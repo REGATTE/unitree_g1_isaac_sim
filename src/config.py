@@ -28,6 +28,7 @@ class AppConfig:
     width: int
     height: int
     max_frames: int
+    print_all_joints: bool
 
     def resolve_asset_path(self) -> Path:
         asset_path = self.asset_path or DEFAULT_ASSET_BY_VARIANT[self.robot_variant]
@@ -107,6 +108,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=0,
         help="Stop after N Kit frames. Use 0 to run until the app closes.",
     )
+    parser.add_argument(
+        "--print-all-joints",
+        action="store_true",
+        help="Print the full articulation joint list during startup validation.",
+    )
     return parser
 
 
@@ -123,4 +129,5 @@ def parse_config(argv: list[str] | None = None) -> AppConfig:
         width=args.width,
         height=args.height,
         max_frames=args.max_frames,
+        print_all_joints=args.print_all_joints,
     )
