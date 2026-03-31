@@ -12,6 +12,7 @@ import sys
 import traceback
 
 from config import PROJECT_ROOT, AppConfig, parse_config
+from mapping import log_joint_validation_report, to_dds_ordered_snapshot, validate_live_joint_order
 from robot_state import RobotStateReader, log_joint_state
 from scene import build_scene
 
@@ -57,8 +58,6 @@ def run_main_loop(simulation_app, world, max_frames: int, headless: bool) -> Non
                 break
     except KeyboardInterrupt:
         pass
-    finally:
-        timeline.stop()
 
 
 def initialize_robot_state_reader(config: AppConfig) -> RobotStateReader:
@@ -66,8 +65,23 @@ def initialize_robot_state_reader(config: AppConfig) -> RobotStateReader:
 
     state_reader = RobotStateReader(config.robot_prim_path)
     state_reader.initialize()
-    snapshot = state_reader.read_snapshot()
-    log_joint_state(snapshot, limit=None if config.print_all_joints else 12)
+    sim_snapshot = state_reader.read_snapshot()
+    validation_report = validate_live_joint_order(sim_snapshot.joint_names)
+    log_joint_validation_report(validation_report)
+    log_joint_state(
+        sim_snapshot,
+        limit=None if config.print_all_joints else 12,
+        order_label="sim",
+    )
+
+    # Print a short DDS-ordered preview so the next DDS publisher can rely on
+    # the exact same reordered state path already exercised at startup.
+    dds_snapshot = to_dds_ordered_snapshot(sim_snapshot)
+    log_joint_state(
+        dds_snapshot,
+        limit=8,
+        order_label="dds",
+    )
     return state_reader
 
 

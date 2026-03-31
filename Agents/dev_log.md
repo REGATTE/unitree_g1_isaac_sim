@@ -27,7 +27,25 @@
 
 ## ===================================================================================================================================
 
-## 2026-03-30 21:14:21 PDT Update
+## 2026-03-30 21:25:21 PDT Post-Commit Update
+
+- Added `src/mapping/joints.py`.
+- Froze the Isaac Sim 29-joint articulation order from the live `--print-all-joints` run.
+- Added the Isaac Lab DDS 29-joint body order from `tasks/common_observations/g1_29dof_state.py`.
+- Added explicit bidirectional index maps between simulator order and DDS order.
+- Added `src/mapping/__init__.py` for clean imports.
+
+## Resume Here
+
+- Re-read `Agents/implementation_plan.md`.
+- Use `src/mapping/joints.py` as the canonical 29-joint mapping layer.
+- Next step:
+  - reorder simulator state into DDS order
+  - then start `dds/g1_lowstate.py` or equivalent DDS-state publication code
+
+## ===================================================================================================================================
+
+## 2026-03-30 22:00:25 PDT Update
 
 - Added `src/robot_state.py`.
 - `main.py` now initializes a G1 articulation reader after scene creation.
@@ -40,5 +58,22 @@
 
 - Re-read `Agents/implementation_plan.md`.
 - Run `isaac_sim_python main.py --print-all-joints`.
-- Freeze the full simulator joint order from `src/robot_state.py`.
-- After that, implement joint-order mapping for DDS compatibility.
+- Freeze the simulator joint order from the live articulation output.
+- Commit this state after the joint-order freeze and mapping baseline are in place.
+
+## ===================================================================================================================================
+
+## 2026-03-30 22:13:14 PDT Post-Commit Update
+
+- Added `src/mapping/validator.py` and wired startup validation against the frozen sim order.
+- Added `src/mapping/conversion.py` with pure helpers to reorder joint-aligned data between simulator order and DDS order.
+- Startup now prints both a simulator-order preview and a short DDS-order preview from the same live snapshot.
+- Verified the DDS-order preview matches the expected live 29-joint body order.
+
+## Resume Here
+
+- Commit this state.
+- Re-read `Agents/implementation_plan.md`.
+- The next step is DDS state publication.
+- Use `src/mapping/conversion.py` as the canonical sim-to-DDS reorder layer.
+- Wire the DDS-ordered snapshot path into the first `rt/lowstate` publisher.

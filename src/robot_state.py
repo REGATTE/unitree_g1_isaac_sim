@@ -82,13 +82,19 @@ def _to_float_list(values) -> list[float]:
     return [float(value) for value in values]
 
 
-def log_joint_state(snapshot: JointStateSnapshot, limit: int | None = 12) -> None:
+def log_joint_state(
+    snapshot: JointStateSnapshot,
+    limit: int | None = 12,
+    order_label: str | None = None,
+) -> None:
     """Print a startup joint-state preview.
 
     Set ``limit`` to ``None`` to print the full articulation order.
+    Use ``order_label`` to distinguish simulator-order and DDS-order logs.
     """
+    label_prefix = f"{order_label}_" if order_label else ""
     total = len(snapshot.joint_names)
-    print(f"[unitree_g1_isaac_sim] detected {total} joints")
+    print(f"[unitree_g1_isaac_sim] detected {total} {label_prefix}joints")
     visible_joint_count = total if limit is None else min(total, limit)
     for index, name in enumerate(snapshot.joint_names[:visible_joint_count]):
         position = snapshot.joint_positions[index] if index < len(snapshot.joint_positions) else float("nan")
@@ -96,13 +102,13 @@ def log_joint_state(snapshot: JointStateSnapshot, limit: int | None = 12) -> Non
         if snapshot.joint_efforts is not None and index < len(snapshot.joint_efforts):
             effort = snapshot.joint_efforts[index]
             print(
-                f"[unitree_g1_isaac_sim] joint[{index:02d}] {name}: "
+                f"[unitree_g1_isaac_sim] {label_prefix}joint[{index:02d}] {name}: "
                 f"pos={position:.6f} vel={velocity:.6f} effort={effort:.6f}"
             )
         else:
             print(
-                f"[unitree_g1_isaac_sim] joint[{index:02d}] {name}: "
+                f"[unitree_g1_isaac_sim] {label_prefix}joint[{index:02d}] {name}: "
                 f"pos={position:.6f} vel={velocity:.6f}"
             )
     if limit is not None and total > limit:
-        print(f"[unitree_g1_isaac_sim] ... truncated {total - limit} additional joints")
+        print(f"[unitree_g1_isaac_sim] ... truncated {total - limit} additional {label_prefix}joints")
