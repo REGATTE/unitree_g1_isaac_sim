@@ -37,7 +37,14 @@ def to_dds_ordered_snapshot(
     snapshot: JointStateSnapshot,
     mapping: JointOrderMapping = G1_29DOF_JOINT_MAPPING,
 ) -> JointStateSnapshot:
-    """Build a DDS-ordered view of a raw simulator joint-state snapshot."""
+    """Build a DDS-ordered view of a raw simulator joint-state snapshot.
+
+    This helper is intended to be safe as a standalone conversion boundary.
+    Callers should be able to hand it a live simulator snapshot without
+    remembering to validate joint order separately first.
+    """
+    # Refuse to relabel state unless the snapshot still matches the frozen
+    # simulator order that the mapping tables were built against.
     _validate_snapshot_joint_names(snapshot, mapping)
     return JointStateSnapshot(
         joint_names=list(mapping.dds_joint_names),
