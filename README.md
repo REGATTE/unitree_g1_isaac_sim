@@ -61,6 +61,10 @@ Important DDS note:
 - The simulator should publish the same low-level topics a real robot publishes so higher-level clients such as `unitree_sdk2` or `unitree_ros2` can run on top without simulator-specific adaptations.
 - The current implementation slice focuses on `rt/lowstate` publication first.
 - The `rt/lowcmd` subscriber object now exists, but applying incoming commands back into Isaac Sim remains a follow-up step.
+- The current DDS manager runs inside the same Isaac Sim process and main simulation loop.
+- This is intentionally simpler than the Isaac Lab reference, which uses a heavier shared-memory and threaded structure between simulation state production and DDS I/O.
+- The direct single-process path keeps the current simulator easier to read and debug while DDS compatibility is still being established.
+- A threaded/shared-memory DDS decoupling layer can be added later if tighter runtime isolation or more flexible producer/consumer separation becomes necessary.
 
 ## TODO
 
@@ -81,6 +85,7 @@ Important DDS note:
 - [ ] Apply incoming low-level body commands back into simulator joint order
 - [x] Add CRC handling on live DDS publish/subscribe paths
 - [ ] Verify publish cadence and runtime behavior against the real G1 DDS contract
+- [ ] Add an optional threaded/shared-memory DDS decoupling layer if runtime isolation is needed
 - [ ] Add optional hand/gripper DDS bridges if needed for dex1, dex3, and inspire
 - [ ] Add reset/simulator-state utility DDS topics if needed
 - [ ] Test the external client path with a real Unitree SDK-based DDS client

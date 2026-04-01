@@ -14,6 +14,7 @@ import traceback
 from config import PROJECT_ROOT, AppConfig, parse_config
 from dds import DdsManager
 from mapping import log_joint_validation_report, to_dds_ordered_snapshot, validate_live_joint_order
+from robot_control import RobotCommandApplier
 from robot_state import JointStateSnapshot, RobotStateReader, log_joint_state, log_kinematic_snapshot
 from scene import build_scene
 
@@ -54,6 +55,7 @@ def run_main_loop(
     physics_dt: float,
     state_reader: RobotStateReader,
     dds_manager: DdsManager | None,
+    command_applier: RobotCommandApplier | None,
 ) -> None:
     """Advance the simulator until the app closes or the frame cap is reached."""
 
@@ -61,6 +63,10 @@ def run_main_loop(
     simulation_time_seconds = 0.0
     try:
         while simulation_app.is_running():
+            # Apply the latest cached low-level command before stepping physics
+            # so the next simulator frame reflects the current DDS input.
+            if dds_manager is not None and command_applier is not None:
+                command_applier.apply_lowcmd(dds_manager.latest_lowcmd)
             # Use World.step so the simulation context, physics, and rendering stay aligned.
             world.step(render=not headless)
             frame_count += 1
@@ -123,6 +129,9 @@ def main() -> int:
         world = create_world(config)
         state_reader = initialize_robot_state_reader(config)
         dds_manager = DdsManager(config) if config.enable_dds else None
+        command_applier = RobotCommandApplier(state_reader) if config.enable_dds else None
+        if dds_manager is not None:
+            dds_manager.initialize()
         run_main_loop(
             simulation_app,
             world,
@@ -131,6 +140,7 @@ def main() -> int:
             config.physics_dt,
             state_reader,
             dds_manager,
+            command_applier,
         )
     except Exception:
         print("[unitree_g1_isaac_sim] fatal error during startup/runtime", file=sys.stderr)

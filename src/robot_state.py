@@ -114,7 +114,14 @@ def import_articulation():
 
 
 class RobotStateReader:
-    """Thin articulation wrapper for reading simulator joint state."""
+    """Thin articulation wrapper for reading and commanding simulator joints.
+
+    The first development slices in this repository focused on reliable state
+    extraction. The DDS command path now reuses the same articulation wrapper
+    so joint-order assumptions stay localized and the rest of the codebase does
+    not need to know which Isaac Sim articulation methods are available in a
+    given runtime version.
+    """
 
     def __init__(self, robot_prim_path: str) -> None:
         Articulation = import_articulation()
@@ -187,6 +194,44 @@ class RobotStateReader:
             imu_angular_velocity_body=imu_angular_velocity_body,
         )
 
+    def apply_joint_position_targets(self, joint_positions: Sequence[float]) -> bool:
+        """Apply a full-body joint-position target vector in simulator order.
+
+        Returns `True` when a target setter is found on the articulation.
+        Falls back to `set_joint_positions()` only if a dedicated target API is
+        unavailable in the current Isaac Sim runtime.
+        """
+        self._require_initialized()
+        normalized = _validate_joint_command_width(joint_positions, len(self.joint_names), "joint_positions")
+        if hasattr(self._articulation, "set_joint_position_targets"):
+            self._articulation.set_joint_position_targets(normalized)
+            return True
+        if hasattr(self._articulation, "set_joint_positions"):
+            self._articulation.set_joint_positions(normalized)
+            return True
+        return False
+
+    def apply_joint_velocity_targets(self, joint_velocities: Sequence[float]) -> bool:
+        """Apply a full-body joint-velocity target vector in simulator order."""
+        self._require_initialized()
+        normalized = _validate_joint_command_width(joint_velocities, len(self.joint_names), "joint_velocities")
+        if hasattr(self._articulation, "set_joint_velocity_targets"):
+            self._articulation.set_joint_velocity_targets(normalized)
+            return True
+        if hasattr(self._articulation, "set_joint_velocities"):
+            self._articulation.set_joint_velocities(normalized)
+            return True
+        return False
+
+    def apply_joint_efforts(self, joint_efforts: Sequence[float]) -> bool:
+        """Apply a full-body joint-effort vector in simulator order."""
+        self._require_initialized()
+        normalized = _validate_joint_command_width(joint_efforts, len(self.joint_names), "joint_efforts")
+        if hasattr(self._articulation, "set_joint_efforts"):
+            self._articulation.set_joint_efforts(normalized)
+            return True
+        return False
+
     def _require_initialized(self) -> None:
         if not self._initialized:
             raise RuntimeError("RobotStateReader must be initialized before reading state.")
@@ -251,6 +296,18 @@ def _to_fixed_float_list(
     if len(normalized) < expected_length:
         normalized = normalized + [0.0] * (expected_length - len(normalized))
     return normalized[:expected_length]
+
+
+def _validate_joint_command_width(
+    values: Sequence[float],
+    expected_length: int,
+    label: str,
+) -> list[float]:
+    """Normalize and validate a full-width joint command vector."""
+    normalized = [float(value) for value in values]
+    if len(normalized) != expected_length:
+        raise ValueError(f"Expected {expected_length} {label} values, got {len(normalized)}")
+    return normalized
 
 
 def _rotate_world_vector_to_body(vector_world: list[float], quaternion_wxyz: list[float]) -> list[float]:
