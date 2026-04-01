@@ -77,3 +77,59 @@
 - The next step is DDS state publication.
 - Use `src/mapping/conversion.py` as the canonical sim-to-DDS reorder layer.
 - Wire the DDS-ordered snapshot path into the first `rt/lowstate` publisher.
+
+## ===================================================================================================================================
+
+## 2026-03-31 23:01:09 PDT Post-Merge Update
+
+- Merged `fix/expand-robot-state-reader` into `main`.
+- The merged branch now expands `src/robot_state.py` beyond joint-only reads and establishes the first DDS-facing kinematic state boundary.
+- Added `RobotKinematicSnapshot` to capture:
+  - joint positions/velocities/efforts
+  - base position in world frame
+  - base quaternion in `wxyz`
+  - base linear/angular velocity
+  - IMU-like proper acceleration in body frame
+  - IMU-like angular velocity in body frame
+- Tightened the new snapshot container so it behaves immutably in practice:
+  - tuple-backed fields
+  - normalization in `__post_init__`
+- Refactored the state reader so joint-only reads stay lightweight:
+  - `read_snapshot()` uses a direct joint read path
+  - kinematic/IMU logic is separated from the joint-only path
+- Added `ImuEmulator` to isolate temporal acceleration estimation.
+- Removed wall-clock timing from acceleration estimation:
+  - dynamic acceleration now depends only on simulation-derived `sample_dt`
+  - when `sample_dt` is absent or invalid, the IMU path falls back to gravity-only proper acceleration
+- Tightened pose handling:
+  - world-pose reads use strict length validation
+  - linear/angular world-velocity reads remain tolerant
+- Fixed the world-pose quaternion convention bug:
+  - `get_world_poses()` is now treated as scalar-first `wxyz`
+  - removed the incorrect `xyzw -> wxyz` reorder on that path
+  - validated this live from Isaac Sim startup output showing identity orientation as:
+    - `base_quaternion_wxyz=(1.000000, 0.000000, 0.000000, 0.000000)`
+- Added one-time startup logging in `main.py` for:
+  - `base_position_world`
+  - `base_quaternion_wxyz`
+- Verified the merged branch still:
+  - loads the 29-DoF USD correctly
+  - validates the frozen 29-joint articulation order
+  - prints correct simulator-order and DDS-order joint previews
+
+## Resume Here
+
+- Re-read `Agents/implementation_plan.md`.
+- The next implementation target remains the first DDS bridge slice on `main`.
+- Use the merged robot-state reader as the DDS state source:
+  - `RobotStateReader.read_kinematic_snapshot(sample_dt=...)`
+- Next files to add:
+  - `src/dds/__init__.py`
+  - `src/dds/manager.py`
+  - `src/dds/g1_lowstate.py`
+  - `src/dds/g1_lowcmd.py`
+- First goal of the next step:
+  - initialize Cyclone/Unitree DDS objects
+  - build and publish `LowState_` on `rt/lowstate`
+  - use the existing mapping layer for body joint ordering
+  - keep quaternion output in the validated `wxyz` convention
