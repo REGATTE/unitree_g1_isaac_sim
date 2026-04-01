@@ -133,3 +133,33 @@
   - build and publish `LowState_` on `rt/lowstate`
   - use the existing mapping layer for body joint ordering
   - keep quaternion output in the validated `wxyz` convention
+
+## ===================================================================================================================================
+
+## 2026-03-31 23:04:24 PDT Post-Merge Update
+
+- Merged `fix/validate-dds-snapshot-order` into `main`.
+- Hardened `src/mapping/conversion.py` so DDS relabeling is no longer width-only validation.
+- `to_dds_ordered_snapshot()` now validates `snapshot.joint_names` against the frozen simulator joint order before relabeling to DDS order.
+- This closes the silent-corruption path where a future DDS publisher could reuse the conversion helper on a mismatched snapshot and publish mislabeled joint state.
+- Added inline documentation in the conversion helper explaining that it is intended to be a safe standalone DDS boundary, not a blind reorder utility.
+- `main` now contains both sides of the current DDS state boundary work:
+  - validated simulator-order to DDS-order joint conversion
+  - validated robot kinematic state extraction with the confirmed `wxyz` quaternion convention
+
+## Resume Here
+
+- Re-read `Agents/implementation_plan.md`.
+- The next implementation target is still the first DDS bridge slice on `main`.
+- Use the merged state path in this order:
+  - `RobotStateReader.read_kinematic_snapshot(sample_dt=...)`
+  - `to_dds_ordered_snapshot(...)` for body joint-aligned fields
+- Next files to add:
+  - `src/dds/__init__.py`
+  - `src/dds/manager.py`
+  - `src/dds/g1_lowstate.py`
+  - `src/dds/g1_lowcmd.py`
+- First goal of the next step:
+  - publish a correct `LowState_` message on `rt/lowstate`
+  - keep joint ordering validation at the conversion boundary
+  - keep base orientation in the validated Isaac Sim `wxyz` convention
