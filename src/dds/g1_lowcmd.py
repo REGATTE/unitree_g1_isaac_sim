@@ -1,0 +1,102 @@
+"""`rt/lowcmd` subscription boundary for the Unitree G1 simulator.
+
+This module is intentionally conservative in the first DDS slice. It provides
+the subscriber object and raw message validation/caching, but it does not yet
+apply commands back into Isaac Sim. That mapping step should only be added
+after `rt/lowstate` publication is verified against an external client.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+from mapping import reorder_dds_values_to_sim
+
+
+@dataclass(frozen=True)
+class LowCmdCache:
+    """Raw command cache for the next simulator-control integration step."""
+
+    mode_pr: int
+    mode_machine: int
+    joint_positions_dds: tuple[float, ...]
+    joint_velocities_dds: tuple[float, ...]
+    joint_torques_dds: tuple[float, ...]
+    joint_kp_dds: tuple[float, ...]
+    joint_kd_dds: tuple[float, ...]
+
+    def to_sim_order(self) -> dict[str, list[float]]:
+        """Return body-joint command vectors in simulator joint order.
+
+        The command application path is still a follow-up step, but exposing
+        this conversion here makes the next control-layer patch explicit and
+        keeps the DDS-to-simulator joint-order translation centralized.
+        """
+        return {
+            "positions": reorder_dds_values_to_sim(self.joint_positions_dds),
+            "velocities": reorder_dds_values_to_sim(self.joint_velocities_dds),
+            "torques": reorder_dds_values_to_sim(self.joint_torques_dds),
+            "kp": reorder_dds_values_to_sim(self.joint_kp_dds),
+            "kd": reorder_dds_values_to_sim(self.joint_kd_dds),
+        }
+
+
+class G1LowCmdSubscriber:
+    """Receive raw `rt/lowcmd` messages and cache the latest validated sample."""
+
+    def __init__(self, topic_name: str = "rt/lowcmd") -> None:
+        self._topic_name = topic_name
+        self._subscriber: Any | None = None
+        self._crc_helper: Any | None = None
+        self._latest_command: LowCmdCache | None = None
+        self._sdk_enabled = False
+        self._warned_unavailable = False
+
+    @property
+    def latest_command(self) -> LowCmdCache | None:
+        return self._latest_command
+
+    def initialize(self) -> bool:
+        """Create the Unitree subscriber if the SDK is installed."""
+        if self._sdk_enabled:
+            return True
+        try:
+            from unitree_sdk2py.core.channel import ChannelSubscriber
+            from unitree_sdk2py.idl.unitree_hg.msg.dds_ import LowCmd_
+            from unitree_sdk2py.utils.crc import CRC
+        except ImportError:
+            if not self._warned_unavailable:
+                print(
+                    "[unitree_g1_isaac_sim] DDS lowcmd subscriber requested but "
+                    "`unitree_sdk2py` is not installed. Skipping subscription."
+                )
+                self._warned_unavailable = True
+            return False
+
+        self._subscriber = ChannelSubscriber(self._topic_name, LowCmd_)
+        self._subscriber.Init(self._on_message, 32)
+        self._crc_helper = CRC()
+        self._sdk_enabled = True
+        print(f"[unitree_g1_isaac_sim] DDS lowcmd subscriber ready on {self._topic_name}")
+        return True
+
+    def _on_message(self, msg: Any) -> None:
+        """Validate and cache one incoming `LowCmd_` message."""
+        if self._crc_helper is None:
+            return
+        if self._crc_helper.Crc(msg) != msg.crc:
+            print("[unitree_g1_isaac_sim] dropped `rt/lowcmd` message with invalid CRC")
+            return
+
+        motor_cmd = msg.motor_cmd
+        count = len(motor_cmd)
+        self._latest_command = LowCmdCache(
+            mode_pr=int(msg.mode_pr),
+            mode_machine=int(msg.mode_machine),
+            joint_positions_dds=tuple(float(motor_cmd[index].q) for index in range(count)),
+            joint_velocities_dds=tuple(float(motor_cmd[index].dq) for index in range(count)),
+            joint_torques_dds=tuple(float(motor_cmd[index].tau) for index in range(count)),
+            joint_kp_dds=tuple(float(motor_cmd[index].kp) for index in range(count)),
+            joint_kd_dds=tuple(float(motor_cmd[index].kd) for index in range(count)),
+        )

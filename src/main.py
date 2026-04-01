@@ -12,6 +12,7 @@ import sys
 import traceback
 
 from config import PROJECT_ROOT, AppConfig, parse_config
+from dds import DdsManager
 from mapping import log_joint_validation_report, to_dds_ordered_snapshot, validate_live_joint_order
 from robot_state import JointStateSnapshot, RobotStateReader, log_joint_state, log_kinematic_snapshot
 from scene import build_scene
@@ -45,15 +46,28 @@ def create_world(config: AppConfig):
     return world
 
 
-def run_main_loop(simulation_app, world, max_frames: int, headless: bool) -> None:
+def run_main_loop(
+    simulation_app,
+    world,
+    max_frames: int,
+    headless: bool,
+    physics_dt: float,
+    state_reader: RobotStateReader,
+    dds_manager: DdsManager | None,
+) -> None:
     """Advance the simulator until the app closes or the frame cap is reached."""
 
     frame_count = 0
+    simulation_time_seconds = 0.0
     try:
         while simulation_app.is_running():
             # Use World.step so the simulation context, physics, and rendering stay aligned.
             world.step(render=not headless)
             frame_count += 1
+            simulation_time_seconds += physics_dt
+            if dds_manager is not None:
+                snapshot = state_reader.read_kinematic_snapshot(sample_dt=physics_dt)
+                dds_manager.step(simulation_time_seconds, snapshot)
             if max_frames > 0 and frame_count >= max_frames:
                 break
     except KeyboardInterrupt:
@@ -107,13 +121,24 @@ def main() -> int:
         print(f"[unitree_g1_isaac_sim] asset_path={asset_path}")
         build_scene(asset_path, config)
         world = create_world(config)
-        initialize_robot_state_reader(config)
-        run_main_loop(simulation_app, world, config.max_frames, config.headless)
+        state_reader = initialize_robot_state_reader(config)
+        dds_manager = DdsManager(config) if config.enable_dds else None
+        run_main_loop(
+            simulation_app,
+            world,
+            config.max_frames,
+            config.headless,
+            config.physics_dt,
+            state_reader,
+            dds_manager,
+        )
     except Exception:
         print("[unitree_g1_isaac_sim] fatal error during startup/runtime", file=sys.stderr)
         traceback.print_exc()
         return 1
     finally:
+        if "dds_manager" in locals() and dds_manager is not None:
+            dds_manager.shutdown()
         simulation_app.close()
 
     return 0
