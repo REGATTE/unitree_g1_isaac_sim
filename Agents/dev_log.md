@@ -185,3 +185,68 @@
   - base quaternion must stay in validated Isaac Sim `wxyz` convention
   - IMU acceleration must stay simulation-time derived, never wall-time derived
 - After `rt/lowstate` works, add the first `rt/lowcmd` subscriber and map incoming body commands back into simulator order.
+
+## ===================================================================================================================================
+
+## 2026-03-31 DDS Dev Branch Update
+
+- Created the DDS development branch:
+  - `dds_dev`
+- Started the first DDS bridge slice on `dds_dev`.
+- Added the DDS package under `src/dds/`:
+  - `src/dds/__init__.py`
+  - `src/dds/manager.py`
+  - `src/dds/g1_lowstate.py`
+  - `src/dds/g1_lowcmd.py`
+
+- Implemented the first `rt/lowstate` publication path.
+  - `main.py` now wires DDS stepping into the simulation loop.
+  - The DDS manager runs inside the same Isaac Sim process instead of copying the heavier Isaac Lab shared-memory/threaded structure.
+  - `rt/lowstate` publication consumes:
+    - `RobotStateReader.read_kinematic_snapshot(sample_dt=...)`
+    - `to_dds_ordered_snapshot(...)` for 29-DoF body joint ordering
+    - Unitree SDK2 `LowState_`
+    - CRC generation immediately before publish
+
+- Preserved the DDS-boundary constraints during implementation.
+  - Body-joint publication still routes through the validated simulator-order to DDS-order conversion boundary.
+  - Base orientation remains in validated Isaac Sim `wxyz` internally.
+  - The only quaternion reorder introduced is the explicit DDS IMU packing step for the outgoing Unitree message field.
+  - IMU acceleration remains simulation-time derived only.
+
+- Added the first `rt/lowcmd` subscriber skeleton.
+  - The subscriber validates CRC and caches the latest raw DDS command.
+  - DDS-order command vectors can now be translated back into simulator order in one place.
+  - Applying those commands into Isaac Sim articulation control is still pending.
+
+- Added DDS-related runtime flags in `src/config.py`.
+  - `--enable-dds`
+  - `--dds-domain-id`
+  - `--lowstate-topic`
+  - `--lowcmd-topic`
+  - `--lowstate-publish-hz`
+  - `--enable-lowcmd-subscriber`
+
+- Added and updated project documentation.
+  - Added `Agents/constraints.md` to record the DDS implementation constraints explicitly.
+  - Reworked `README.md` to make launch usage clearer.
+  - Replaced the old run/args layout with a table-based argument section.
+  - Moved the TODO list to the bottom of the README.
+
+- Verified during this round:
+  - `python3 -m py_compile src/config.py src/main.py src/dds/__init__.py src/dds/manager.py src/dds/g1_lowstate.py src/dds/g1_lowcmd.py`
+
+- Reference notes captured during review:
+  - The Isaac Lab reference DDS manager defaults to a `0.01` second publish interval, which is `100 Hz`.
+  - The Isaac Lab G1 observation path also uses a `20 ms` DDS write throttle, which is `50 Hz` on that path.
+  - No rate behavior was changed in this repo during the follow-up README clarification round.
+
+## Resume Here
+
+- Test `rt/lowstate` end-to-end with a real external Unitree SDK2 or `unitree_ros2` client.
+- Confirm the actual publish cadence and message-field expectations against the external client path.
+- Implement the next DDS-control slice:
+  - take cached `rt/lowcmd` body commands
+  - map them from DDS order back into simulator order
+  - apply them into Isaac Sim articulation control
+- After body lowcmd works, decide whether optional dex1/dex3/inspire DDS bridges are needed for the intended G1 configuration.
