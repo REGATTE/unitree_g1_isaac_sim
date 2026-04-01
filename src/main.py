@@ -13,7 +13,7 @@ import traceback
 
 from config import PROJECT_ROOT, AppConfig, parse_config
 from mapping import log_joint_validation_report, to_dds_ordered_snapshot, validate_live_joint_order
-from robot_state import RobotStateReader, log_joint_state
+from robot_state import JointStateSnapshot, RobotStateReader, log_joint_state, log_kinematic_snapshot
 from scene import build_scene
 
 
@@ -65,7 +65,14 @@ def initialize_robot_state_reader(config: AppConfig) -> RobotStateReader:
 
     state_reader = RobotStateReader(config.robot_prim_path)
     state_reader.initialize()
-    sim_snapshot = state_reader.read_snapshot()
+    kinematic_snapshot = state_reader.read_kinematic_snapshot(sample_dt=config.physics_dt)
+    log_kinematic_snapshot(kinematic_snapshot)
+    sim_snapshot = JointStateSnapshot(
+        joint_names=list(kinematic_snapshot.joint_names),
+        joint_positions=list(kinematic_snapshot.joint_positions),
+        joint_velocities=list(kinematic_snapshot.joint_velocities),
+        joint_efforts=list(kinematic_snapshot.joint_efforts) if kinematic_snapshot.joint_efforts is not None else None,
+    )
     validation_report = validate_live_joint_order(sim_snapshot.joint_names)
     log_joint_validation_report(validation_report)
     log_joint_state(

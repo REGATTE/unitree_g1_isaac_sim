@@ -161,10 +161,7 @@ class RobotStateReader:
 
         joint_positions, joint_velocities, joint_efforts = self._read_joint_state()
 
-        base_position_world, base_quaternion_xyzw = self._read_world_pose()
-        # Isaac Sim world-pose APIs commonly report quaternions as xyzw.
-        # Convert once here so downstream code can treat wxyz as canonical.
-        base_quaternion_wxyz = _quat_xyzw_to_wxyz(base_quaternion_xyzw)
+        base_position_world, base_quaternion_wxyz = self._read_world_pose()
         base_linear_velocity_world = self._read_linear_velocity_world()
         base_angular_velocity_world = self._read_angular_velocity_world()
         imu_linear_acceleration_body = self._imu.compute_body_linear_acceleration(
@@ -203,6 +200,12 @@ class RobotStateReader:
         return joint_positions, joint_velocities, joint_efforts
 
     def _read_world_pose(self) -> tuple[list[float], list[float]]:
+        """Read the base world pose from Isaac Sim.
+
+        `get_world_poses()` is treated as returning scalar-first quaternions in
+        wxyz order. Keep that ordering unchanged here so all downstream frame
+        math uses the raw Isaac Sim convention directly.
+        """
         if not hasattr(self._articulation, "get_world_poses"):
             return [0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]
         positions, orientations = self._articulation.get_world_poses()
@@ -248,16 +251,6 @@ def _to_fixed_float_list(
     if len(normalized) < expected_length:
         normalized = normalized + [0.0] * (expected_length - len(normalized))
     return normalized[:expected_length]
-
-
-def _quat_xyzw_to_wxyz(quaternion_xyzw: list[float]) -> list[float]:
-    """Convert Isaac Sim-style xyzw quaternions into the DDS-facing wxyz form."""
-    return [
-        quaternion_xyzw[3],
-        quaternion_xyzw[0],
-        quaternion_xyzw[1],
-        quaternion_xyzw[2],
-    ]
 
 
 def _rotate_world_vector_to_body(vector_world: list[float], quaternion_wxyz: list[float]) -> list[float]:
@@ -335,6 +328,17 @@ def _mat3_mul_vec3(matrix: list[list[float]], vector: Sequence[float]) -> list[f
         matrix[1][0] * vector[0] + matrix[1][1] * vector[1] + matrix[1][2] * vector[2],
         matrix[2][0] * vector[0] + matrix[2][1] * vector[1] + matrix[2][2] * vector[2],
     ]
+
+
+def log_kinematic_snapshot(snapshot: RobotKinematicSnapshot) -> None:
+    """Print a one-time startup summary for base pose conventions."""
+    position = ", ".join(f"{value:.6f}" for value in snapshot.base_position_world)
+    quaternion = ", ".join(f"{value:.6f}" for value in snapshot.base_quaternion_wxyz)
+    print(f"[unitree_g1_isaac_sim] base_position_world=({position})")
+    print(
+        "[unitree_g1_isaac_sim] base_quaternion_wxyz="
+        f"({quaternion}) from Isaac Sim get_world_poses()"
+    )
 
 
 def log_joint_state(
