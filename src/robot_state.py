@@ -10,6 +10,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 import time
+from typing import Sequence
+
+
+_GRAVITY_MAGNITUDE_MPS2 = 9.81
+_WORLD_GRAVITY_VECTOR = (0.0, 0.0, -_GRAVITY_MAGNITUDE_MPS2)
+_WORLD_PROPER_ACCELERATION_AT_REST = (0.0, 0.0, _GRAVITY_MAGNITUDE_MPS2)
 
 
 @dataclass(frozen=True)
@@ -31,17 +37,73 @@ class RobotKinematicSnapshot:
     duplicating quaternion/frame assumptions inside DDS code later.
     """
 
-    joint_names: list[str]
-    joint_positions: list[float]
-    joint_velocities: list[float]
-    joint_efforts: list[float] | None
-    base_position_world: list[float]
-    base_quaternion_wxyz: list[float]
-    base_linear_velocity_world: list[float]
-    base_angular_velocity_world: list[float]
-    imu_linear_acceleration_body: list[float]
-    imu_angular_velocity_body: list[float]
+    joint_names: tuple[str, ...]
+    joint_positions: tuple[float, ...]
+    joint_velocities: tuple[float, ...]
+    joint_efforts: tuple[float, ...] | None
+    base_position_world: tuple[float, ...]
+    base_quaternion_wxyz: tuple[float, ...]
+    base_linear_velocity_world: tuple[float, ...]
+    base_angular_velocity_world: tuple[float, ...]
+    imu_linear_acceleration_body: tuple[float, ...]
+    imu_angular_velocity_body: tuple[float, ...]
     quaternion_convention: str = "wxyz"
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "joint_names", tuple(self.joint_names))
+        object.__setattr__(self, "joint_positions", tuple(self.joint_positions))
+        object.__setattr__(self, "joint_velocities", tuple(self.joint_velocities))
+        if self.joint_efforts is not None:
+            object.__setattr__(self, "joint_efforts", tuple(self.joint_efforts))
+        object.__setattr__(self, "base_position_world", tuple(self.base_position_world))
+        object.__setattr__(self, "base_quaternion_wxyz", tuple(self.base_quaternion_wxyz))
+        object.__setattr__(self, "base_linear_velocity_world", tuple(self.base_linear_velocity_world))
+        object.__setattr__(self, "base_angular_velocity_world", tuple(self.base_angular_velocity_world))
+        object.__setattr__(self, "imu_linear_acceleration_body", tuple(self.imu_linear_acceleration_body))
+        object.__setattr__(self, "imu_angular_velocity_body", tuple(self.imu_angular_velocity_body))
+
+
+class ImuEmulator:
+    """Small helper for IMU-like proper acceleration estimation.
+
+    The simulator world is assumed to use a z-up convention with gravity
+    pointing along [0, 0, -9.81] in world coordinates. The returned linear
+    acceleration matches the usual IMU proper-acceleration convention, so a
+    stationary upright robot reports approximately [0, 0, +9.81] in body frame.
+    """
+
+    def __init__(self) -> None:
+        self._last_linear_velocity_world: list[float] | None = None
+        self._last_read_time: float | None = None
+
+    def compute_body_linear_acceleration(
+        self,
+        linear_velocity_world: list[float],
+        quaternion_wxyz: list[float],
+        sample_dt: float | None,
+    ) -> list[float]:
+        now = time.perf_counter()
+        dt = sample_dt
+        if dt is None and self._last_read_time is not None:
+            dt = now - self._last_read_time
+
+        if dt is None or dt <= 0.0 or self._last_linear_velocity_world is None:
+            acceleration_body = _gravity_only_acceleration_body(quaternion_wxyz)
+        else:
+            acceleration_world = _finite_difference_acceleration(
+                self._last_linear_velocity_world,
+                linear_velocity_world,
+                dt,
+            )
+            proper_acceleration_world = _world_acceleration_to_proper_acceleration(acceleration_world)
+            acceleration_body = _rotate_world_vector_to_body(
+                proper_acceleration_world,
+                quaternion_wxyz,
+            )
+
+        self._last_linear_velocity_world = list(linear_velocity_world)
+        self._last_read_time = now
+        return acceleration_body
 
 
 def import_articulation():
@@ -61,8 +123,7 @@ class RobotStateReader:
         self._robot_prim_path = robot_prim_path
         self._articulation = Articulation(prim_paths_expr=robot_prim_path, name="unitree_g1")
         self._initialized = False
-        self._last_linear_velocity_world: list[float] | None = None
-        self._last_read_time: float | None = None
+        self._imu = ImuEmulator()
 
     def initialize(self) -> None:
         if self._initialized:
@@ -79,12 +140,13 @@ class RobotStateReader:
 
     def read_snapshot(self) -> JointStateSnapshot:
         """Read the current joint-level state from the simulator."""
-        state = self.read_kinematic_snapshot()
+        self._require_initialized()
+        joint_positions, joint_velocities, joint_efforts = self._read_joint_state()
         return JointStateSnapshot(
-            joint_names=state.joint_names,
-            joint_positions=state.joint_positions,
-            joint_velocities=state.joint_velocities,
-            joint_efforts=state.joint_efforts,
+            joint_names=self.joint_names,
+            joint_positions=_to_float_list(joint_positions),
+            joint_velocities=_to_float_list(joint_velocities),
+            joint_efforts=_to_float_list(joint_efforts) if joint_efforts is not None else None,
         )
 
     def read_kinematic_snapshot(self, sample_dt: float | None = None) -> RobotKinematicSnapshot:
@@ -94,22 +156,17 @@ class RobotStateReader:
         in the body frame so downstream DDS packaging does not need to infer
         frame conventions from raw simulator APIs.
         """
-        if not self._initialized:
-            raise RuntimeError("RobotStateReader must be initialized before reading state.")
+        self._require_initialized()
 
-        joint_positions = self._articulation.get_joint_positions()
-        joint_velocities = self._articulation.get_joint_velocities()
-        joint_efforts = None
-        if hasattr(self._articulation, "get_measured_joint_efforts"):
-            joint_efforts = self._articulation.get_measured_joint_efforts()
+        joint_positions, joint_velocities, joint_efforts = self._read_joint_state()
 
         base_position_world, base_quaternion_xyzw = self._read_world_pose()
         # Isaac Sim world-pose APIs commonly report quaternions as xyzw.
         # Convert once here so downstream code can treat wxyz as canonical.
         base_quaternion_wxyz = _quat_xyzw_to_wxyz(base_quaternion_xyzw)
-        base_linear_velocity_world = self._read_world_vector("get_linear_velocities")
-        base_angular_velocity_world = self._read_world_vector("get_angular_velocities")
-        imu_linear_acceleration_body = self._compute_body_linear_acceleration(
+        base_linear_velocity_world = self._read_linear_velocity_world()
+        base_angular_velocity_world = self._read_angular_velocity_world()
+        imu_linear_acceleration_body = self._imu.compute_body_linear_acceleration(
             base_linear_velocity_world,
             base_quaternion_wxyz,
             sample_dt,
@@ -120,7 +177,7 @@ class RobotStateReader:
         )
 
         return RobotKinematicSnapshot(
-            joint_names=self.joint_names,
+            joint_names=tuple(self.joint_names),
             joint_positions=_to_float_list(joint_positions),
             joint_velocities=_to_float_list(joint_velocities),
             joint_efforts=_to_float_list(joint_efforts) if joint_efforts is not None else None,
@@ -132,50 +189,38 @@ class RobotStateReader:
             imu_angular_velocity_body=imu_angular_velocity_body,
         )
 
+    def _require_initialized(self) -> None:
+        if not self._initialized:
+            raise RuntimeError("RobotStateReader must be initialized before reading state.")
+
+    def _read_joint_state(self):
+        joint_positions = self._articulation.get_joint_positions()
+        joint_velocities = self._articulation.get_joint_velocities()
+        joint_efforts = None
+        if hasattr(self._articulation, "get_measured_joint_efforts"):
+            joint_efforts = self._articulation.get_measured_joint_efforts()
+        return joint_positions, joint_velocities, joint_efforts
+
     def _read_world_pose(self) -> tuple[list[float], list[float]]:
         if not hasattr(self._articulation, "get_world_poses"):
             return [0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]
         positions, orientations = self._articulation.get_world_poses()
-        return _to_fixed_float_list(positions, 3), _to_fixed_float_list(orientations, 4)
+        return (
+            _to_fixed_float_list(positions, 3, strict=True),
+            _to_fixed_float_list(orientations, 4, strict=True),
+        )
 
-    def _read_world_vector(self, method_name: str) -> list[float]:
-        if not hasattr(self._articulation, method_name):
+    def _read_linear_velocity_world(self) -> list[float]:
+        if not hasattr(self._articulation, "get_linear_velocities"):
             return [0.0, 0.0, 0.0]
-        values = getattr(self._articulation, method_name)()
+        values = self._articulation.get_linear_velocities()
         return _to_fixed_float_list(values, 3)
 
-    def _compute_body_linear_acceleration(
-        self,
-        linear_velocity_world: list[float],
-        quaternion_wxyz: list[float],
-        sample_dt: float | None,
-    ) -> list[float]:
-        now = time.perf_counter()
-        dt = sample_dt
-        if dt is None and self._last_read_time is not None:
-            dt = now - self._last_read_time
-
-        if dt is None or dt <= 0.0 or self._last_linear_velocity_world is None:
-            gravity_world = [0.0, 0.0, 9.81]
-            acceleration_body = _rotate_world_vector_to_body(gravity_world, quaternion_wxyz)
-        else:
-            acceleration_world = [
-                (linear_velocity_world[index] - self._last_linear_velocity_world[index]) / dt
-                for index in range(3)
-            ]
-            proper_acceleration_world = [
-                acceleration_world[0],
-                acceleration_world[1],
-                acceleration_world[2] + 9.81,
-            ]
-            acceleration_body = _rotate_world_vector_to_body(
-                proper_acceleration_world,
-                quaternion_wxyz,
-            )
-
-        self._last_linear_velocity_world = list(linear_velocity_world)
-        self._last_read_time = now
-        return acceleration_body
+    def _read_angular_velocity_world(self) -> list[float]:
+        if not hasattr(self._articulation, "get_angular_velocities"):
+            return [0.0, 0.0, 0.0]
+        values = self._articulation.get_angular_velocities()
+        return _to_fixed_float_list(values, 3)
 
 
 def _to_float_list(values) -> list[float]:
@@ -190,8 +235,15 @@ def _to_float_list(values) -> list[float]:
     return [float(value) for value in values]
 
 
-def _to_fixed_float_list(values, expected_length: int) -> list[float]:
+def _to_fixed_float_list(
+    values,
+    expected_length: int,
+    *,
+    strict: bool = False,
+) -> list[float]:
     normalized = _to_float_list(values)
+    if strict and len(normalized) != expected_length:
+        raise ValueError(f"Expected vector of length {expected_length}, got {len(normalized)}")
     if len(normalized) < expected_length:
         normalized = normalized + [0.0] * (expected_length - len(normalized))
     return normalized[:expected_length]
@@ -208,19 +260,14 @@ def _quat_xyzw_to_wxyz(quaternion_xyzw: list[float]) -> list[float]:
 
 
 def _rotate_world_vector_to_body(vector_world: list[float], quaternion_wxyz: list[float]) -> list[float]:
-    """Rotate a world-frame vector into the body frame using a wxyz quaternion."""
-    rotation_matrix = _quat_wxyz_to_rotation_matrix(quaternion_wxyz)
-    return [
-        rotation_matrix[0][0] * vector_world[0]
-        + rotation_matrix[1][0] * vector_world[1]
-        + rotation_matrix[2][0] * vector_world[2],
-        rotation_matrix[0][1] * vector_world[0]
-        + rotation_matrix[1][1] * vector_world[1]
-        + rotation_matrix[2][1] * vector_world[2],
-        rotation_matrix[0][2] * vector_world[0]
-        + rotation_matrix[1][2] * vector_world[1]
-        + rotation_matrix[2][2] * vector_world[2],
-    ]
+    """Rotate a world-frame vector into the body frame using a wxyz quaternion.
+
+    `_quat_wxyz_to_rotation_matrix()` returns a body-to-world matrix `R`.
+    Converting a world-frame vector into body coordinates is therefore `R^T * v`.
+    """
+    rotation_body_to_world = _quat_wxyz_to_rotation_matrix(quaternion_wxyz)
+    rotation_world_to_body = _transpose_mat3(rotation_body_to_world)
+    return _mat3_mul_vec3(rotation_world_to_body, vector_world)
 
 
 def _quat_wxyz_to_rotation_matrix(quaternion_wxyz: list[float]) -> list[list[float]]:
@@ -241,6 +288,51 @@ def _quat_wxyz_to_rotation_matrix(quaternion_wxyz: list[float]) -> list[list[flo
         [1.0 - (2.0 * y * y) - (2.0 * z * z), (2.0 * x * y) - (2.0 * z * w), (2.0 * x * z) + (2.0 * y * w)],
         [(2.0 * x * y) + (2.0 * z * w), 1.0 - (2.0 * x * x) - (2.0 * z * z), (2.0 * y * z) - (2.0 * x * w)],
         [(2.0 * x * z) - (2.0 * y * w), (2.0 * y * z) + (2.0 * x * w), 1.0 - (2.0 * x * x) - (2.0 * y * y)],
+    ]
+
+
+def _gravity_only_acceleration_body(quaternion_wxyz: list[float]) -> list[float]:
+    """Return the body-frame proper acceleration for a stationary robot."""
+    return _rotate_world_vector_to_body(list(_WORLD_PROPER_ACCELERATION_AT_REST), quaternion_wxyz)
+
+
+def _finite_difference_acceleration(
+    previous_velocity_world: Sequence[float],
+    current_velocity_world: Sequence[float],
+    dt: float,
+) -> list[float]:
+    return [
+        (current_velocity_world[index] - previous_velocity_world[index]) / dt
+        for index in range(3)
+    ]
+
+
+def _world_acceleration_to_proper_acceleration(acceleration_world: Sequence[float]) -> list[float]:
+    """Convert world-frame linear acceleration into IMU-style proper acceleration.
+
+    World gravity is assumed to be [0, 0, -9.81], so proper acceleration is
+    `a - g`, which adds +9.81 along world z in this z-up convention.
+    """
+    return [
+        acceleration_world[0] - _WORLD_GRAVITY_VECTOR[0],
+        acceleration_world[1] - _WORLD_GRAVITY_VECTOR[1],
+        acceleration_world[2] - _WORLD_GRAVITY_VECTOR[2],
+    ]
+
+
+def _transpose_mat3(matrix: list[list[float]]) -> list[list[float]]:
+    return [
+        [matrix[0][0], matrix[1][0], matrix[2][0]],
+        [matrix[0][1], matrix[1][1], matrix[2][1]],
+        [matrix[0][2], matrix[1][2], matrix[2][2]],
+    ]
+
+
+def _mat3_mul_vec3(matrix: list[list[float]], vector: Sequence[float]) -> list[float]:
+    return [
+        matrix[0][0] * vector[0] + matrix[0][1] * vector[1] + matrix[0][2] * vector[2],
+        matrix[1][0] * vector[0] + matrix[1][1] * vector[1] + matrix[1][2] * vector[2],
+        matrix[2][0] * vector[0] + matrix[2][1] * vector[1] + matrix[2][2] * vector[2],
     ]
 
 
