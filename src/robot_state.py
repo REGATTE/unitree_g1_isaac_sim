@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-import time
 from typing import Sequence
 
 
@@ -74,7 +73,6 @@ class ImuEmulator:
 
     def __init__(self) -> None:
         self._last_linear_velocity_world: list[float] | None = None
-        self._last_read_time: float | None = None
 
     def compute_body_linear_acceleration(
         self,
@@ -82,18 +80,19 @@ class ImuEmulator:
         quaternion_wxyz: list[float],
         sample_dt: float | None,
     ) -> list[float]:
-        now = time.perf_counter()
-        dt = sample_dt
-        if dt is None and self._last_read_time is not None:
-            dt = now - self._last_read_time
+        """Estimate body-frame proper acceleration using simulation time only.
 
-        if dt is None or dt <= 0.0 or self._last_linear_velocity_world is None:
+        `sample_dt` must come from simulator stepping, not host wall time.
+        When no simulation dt is supplied, or there is no previous sample yet,
+        fall back to the stationary gravity-only proper-acceleration reading.
+        """
+        if sample_dt is None or sample_dt <= 0.0 or self._last_linear_velocity_world is None:
             acceleration_body = _gravity_only_acceleration_body(quaternion_wxyz)
         else:
             acceleration_world = _finite_difference_acceleration(
                 self._last_linear_velocity_world,
                 linear_velocity_world,
-                dt,
+                sample_dt,
             )
             proper_acceleration_world = _world_acceleration_to_proper_acceleration(acceleration_world)
             acceleration_body = _rotate_world_vector_to_body(
@@ -102,7 +101,6 @@ class ImuEmulator:
             )
 
         self._last_linear_velocity_world = list(linear_velocity_world)
-        self._last_read_time = now
         return acceleration_body
 
 
@@ -154,7 +152,10 @@ class RobotStateReader:
 
         Quaternion output is normalized to `wxyz`. IMU-like signals are exposed
         in the body frame so downstream DDS packaging does not need to infer
-        frame conventions from raw simulator APIs.
+        frame conventions from raw simulator APIs. Dynamic acceleration
+        estimation uses `sample_dt` only when it is supplied from simulation
+        time; otherwise the IMU acceleration falls back to a gravity-only
+        stationary reading.
         """
         self._require_initialized()
 
