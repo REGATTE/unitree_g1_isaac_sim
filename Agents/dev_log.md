@@ -163,3 +163,25 @@
   - publish a correct `LowState_` message on `rt/lowstate`
   - keep joint ordering validation at the conversion boundary
   - keep base orientation in the validated Isaac Sim `wxyz` convention
+
+## ===================================================================================================================================
+
+## 2026-03-31 23:06:06 PDT Next Steps
+
+- Re-read `Agents/implementation_plan.md`.
+- Create a new branch fo rthe DDS dev `dds_dev`.
+- Start the first DDS bridge slice.
+- Add the DDS package skeleton:
+  - `src/dds/__init__.py`
+  - `src/dds/manager.py`
+  - `src/dds/g1_lowstate.py`
+  - `src/dds/g1_lowcmd.py`
+- Build the first `rt/lowstate` publisher using:
+  - `RobotStateReader.read_kinematic_snapshot(sample_dt=...)`
+  - `to_dds_ordered_snapshot(...)` for body joint-aligned fields
+  - Unitree SDK2 `LowState_` + CRC
+- Keep these constraints in place:
+  - body joint ordering must stay validated at the conversion boundary
+  - base quaternion must stay in validated Isaac Sim `wxyz` convention
+  - IMU acceleration must stay simulation-time derived, never wall-time derived
+- After `rt/lowstate` works, add the first `rt/lowcmd` subscriber and map incoming body commands back into simulator order.
