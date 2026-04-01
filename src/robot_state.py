@@ -24,7 +24,12 @@ class JointStateSnapshot:
 
 @dataclass(frozen=True)
 class RobotKinematicSnapshot:
-    """Expanded state sample for DDS-facing robot-state publication."""
+    """Expanded state sample for DDS-facing robot-state publication.
+
+    This is intentionally the state boundary that future `rt/lowstate`
+    publication should consume. Keeping the convention explicit here avoids
+    duplicating quaternion/frame assumptions inside DDS code later.
+    """
 
     joint_names: list[str]
     joint_positions: list[float]
@@ -83,7 +88,12 @@ class RobotStateReader:
         )
 
     def read_kinematic_snapshot(self, sample_dt: float | None = None) -> RobotKinematicSnapshot:
-        """Read joint state plus base and IMU-like signals for DDS publication."""
+        """Read joint state plus base and IMU-like signals for DDS publication.
+
+        Quaternion output is normalized to `wxyz`. IMU-like signals are exposed
+        in the body frame so downstream DDS packaging does not need to infer
+        frame conventions from raw simulator APIs.
+        """
         if not self._initialized:
             raise RuntimeError("RobotStateReader must be initialized before reading state.")
 
@@ -94,6 +104,8 @@ class RobotStateReader:
             joint_efforts = self._articulation.get_measured_joint_efforts()
 
         base_position_world, base_quaternion_xyzw = self._read_world_pose()
+        # Isaac Sim world-pose APIs commonly report quaternions as xyzw.
+        # Convert once here so downstream code can treat wxyz as canonical.
         base_quaternion_wxyz = _quat_xyzw_to_wxyz(base_quaternion_xyzw)
         base_linear_velocity_world = self._read_world_vector("get_linear_velocities")
         base_angular_velocity_world = self._read_world_vector("get_angular_velocities")
@@ -186,6 +198,7 @@ def _to_fixed_float_list(values, expected_length: int) -> list[float]:
 
 
 def _quat_xyzw_to_wxyz(quaternion_xyzw: list[float]) -> list[float]:
+    """Convert Isaac Sim-style xyzw quaternions into the DDS-facing wxyz form."""
     return [
         quaternion_xyzw[3],
         quaternion_xyzw[0],
@@ -195,6 +208,7 @@ def _quat_xyzw_to_wxyz(quaternion_xyzw: list[float]) -> list[float]:
 
 
 def _rotate_world_vector_to_body(vector_world: list[float], quaternion_wxyz: list[float]) -> list[float]:
+    """Rotate a world-frame vector into the body frame using a wxyz quaternion."""
     rotation_matrix = _quat_wxyz_to_rotation_matrix(quaternion_wxyz)
     return [
         rotation_matrix[0][0] * vector_world[0]
@@ -210,6 +224,7 @@ def _rotate_world_vector_to_body(vector_world: list[float], quaternion_wxyz: lis
 
 
 def _quat_wxyz_to_rotation_matrix(quaternion_wxyz: list[float]) -> list[list[float]]:
+    """Build a body-to-world rotation matrix from a normalized wxyz quaternion."""
     w, x, y, z = quaternion_wxyz
     norm = math.sqrt((w * w) + (x * x) + (y * y) + (z * z))
     if norm == 0.0:
