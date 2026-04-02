@@ -63,7 +63,7 @@ assert_log_contains() {
   local file_path="$1"
   local pattern="$2"
   local label="$3"
-  if grep -q "${pattern}" "${file_path}"; then
+  if grep -F -q "${pattern}" "${file_path}"; then
     log "check passed: ${label}"
     return 0
   fi
@@ -148,7 +148,7 @@ run_unit_tests() {
 extract_startup_snapshot() {
   local source_log="$1"
   local output_log="$2"
-  rg "applied deterministic startup state|base_position_world|base_quaternion_wxyz|sim_joint\\[|dds_joint\\[" "${source_log}" \
+  grep -E "applied deterministic startup state|base_position_world|base_quaternion_wxyz|sim_joint\\[|dds_joint\\[" "${source_log}" \
     | sed -E 's/^[0-9-]+ [0-9:,]+ \[[A-Z]+\] \[[^]]+\] //' \
     > "${output_log}"
 }
