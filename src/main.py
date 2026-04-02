@@ -55,12 +55,28 @@ def create_world(config: AppConfig):
     return world
 
 
+def perform_runtime_reset(
+    world,
+    state_reader: RobotStateReader,
+    dds_manager: DdsManager | None,
+) -> None:
+    """Reset the live runtime back to the canonical deterministic state."""
+    LOGGER.info("triggering deterministic runtime reset")
+    world.reset()
+    state_reader.reinitialize_after_world_reset()
+    state_reader.apply_deterministic_reset_state()
+    if dds_manager is not None:
+        dds_manager.reset_runtime_state()
+    LOGGER.info("deterministic runtime reset complete")
+
+
 def run_main_loop(
     simulation_app,
     world,
     max_frames: int,
     headless: bool,
     physics_dt: float,
+    reset_after_frames: int,
     state_reader: RobotStateReader,
     dds_manager: DdsManager | None,
     command_applier: RobotCommandApplier | None,
@@ -69,6 +85,7 @@ def run_main_loop(
 
     frame_count = 0
     simulation_time_seconds = 0.0
+    reset_triggered = False
     try:
         while simulation_app.is_running():
             # Apply the latest cached low-level command before stepping physics
@@ -79,6 +96,10 @@ def run_main_loop(
             world.step(render=not headless)
             frame_count += 1
             simulation_time_seconds += physics_dt
+            if reset_after_frames > 0 and not reset_triggered and frame_count >= reset_after_frames:
+                perform_runtime_reset(world, state_reader, dds_manager)
+                simulation_time_seconds = 0.0
+                reset_triggered = True
             if dds_manager is not None:
                 try:
                     snapshot = state_reader.read_kinematic_snapshot(sample_dt=physics_dt)
@@ -152,6 +173,7 @@ def main() -> int:
             config.max_frames,
             config.headless,
             config.physics_dt,
+            config.reset_after_frames,
             state_reader,
             dds_manager,
             command_applier,

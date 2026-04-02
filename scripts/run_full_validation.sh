@@ -14,6 +14,7 @@ TRACKING_SIM_LOG="${LOG_DIR}/tracking_sim.log"
 TRACKING_LISTENER_LOG="${LOG_DIR}/tracking_listener.log"
 TRACKING_LOWCMD_LOG="${LOG_DIR}/tracking_lowcmd.log"
 TRACKING_CSV_PATH="${LOG_DIR}/tracking_waist_yaw.csv"
+RESET_VALIDATION_LOG="${LOG_DIR}/reset_validation_sim.log"
 LONG_RUN_LOG="${LOG_DIR}/long_run_sim.log"
 SMOKE_LOG_DIR="${LOG_DIR}/smoke"
 
@@ -27,6 +28,8 @@ TRACKING_LOWCMD_DURATION_SECONDS="${TRACKING_LOWCMD_DURATION_SECONDS:-1.5}"
 TRACKING_LOWCMD_JOINT_NAME="${TRACKING_LOWCMD_JOINT_NAME:-waist_yaw_joint}"
 TRACKING_LOWCMD_OFFSET_RAD="${TRACKING_LOWCMD_OFFSET_RAD:-0.05}"
 TRACKING_LISTENER_START_DELAY_SECONDS="${TRACKING_LISTENER_START_DELAY_SECONDS:-1}"
+RESET_AFTER_FRAMES="${RESET_AFTER_FRAMES:-120}"
+RESET_VALIDATION_MAX_FRAMES="${RESET_VALIDATION_MAX_FRAMES:-240}"
 LONG_RUN_MAX_FRAMES="${LONG_RUN_MAX_FRAMES:-2400}"
 LONG_RUN_CADENCE_INTERVAL="${LONG_RUN_CADENCE_INTERVAL:-500}"
 SIM_LOG_TAIL_LINES="${SIM_LOG_TAIL_LINES:-120}"
@@ -68,6 +71,21 @@ assert_log_contains() {
     return 0
   fi
   log "check failed: ${label}"
+  return 1
+}
+
+assert_log_count_at_least() {
+  local file_path="$1"
+  local pattern="$2"
+  local expected_count="$3"
+  local label="$4"
+  local actual_count
+  actual_count=$(grep -F -c "${pattern}" "${file_path}" || true)
+  if (( actual_count >= expected_count )); then
+    log "check passed: ${label} (count=${actual_count})"
+    return 0
+  fi
+  log "check failed: ${label} (count=${actual_count}, expected_at_least=${expected_count})"
   return 1
 }
 
@@ -184,9 +202,9 @@ run_startup_determinism_phase() {
     fail "deterministic startup snapshot mismatch across two fresh launches"
   fi
 
-  assert_log_contains "${STARTUP_RUN1_LOG}" "applied deterministic startup state" "run 1 applied deterministic startup state" \
+  assert_log_contains "${STARTUP_RUN1_LOG}" "applied deterministic reset state" "run 1 applied deterministic reset state" \
     || fail "startup determinism run 1 did not apply deterministic state"
-  assert_log_contains "${STARTUP_RUN2_LOG}" "applied deterministic startup state" "run 2 applied deterministic startup state" \
+  assert_log_contains "${STARTUP_RUN2_LOG}" "applied deterministic reset state" "run 2 applied deterministic reset state" \
     || fail "startup determinism run 2 did not apply deterministic state"
   log "startup determinism snapshots matched across two runs"
 }
@@ -258,6 +276,30 @@ run_tracking_phase() {
   log "tracking and stale-timeout checks passed"
 }
 
+run_reset_validation_phase() {
+  log "phase=in_session_reset"
+  (
+    cd "${REPO_ROOT}"
+    "${ISAACSIM_LAUNCHER}" src/main.py \
+      "${HEADLESS_FLAG}" \
+      --enable-dds \
+      --enable-lowcmd-subscriber \
+      --dds-domain-id "${DDS_DOMAIN_ID}" \
+      --reset-after-frames "${RESET_AFTER_FRAMES}" \
+      --max-frames "${RESET_VALIDATION_MAX_FRAMES}"
+  ) > "${RESET_VALIDATION_LOG}" 2>&1 || fail "reset validation phase failed"
+
+  assert_log_contains "${RESET_VALIDATION_LOG}" "triggering deterministic runtime reset" "reset validation triggered runtime reset" \
+    || fail "reset validation did not trigger runtime reset"
+  assert_log_contains "${RESET_VALIDATION_LOG}" "deterministic runtime reset complete" "reset validation completed runtime reset" \
+    || fail "reset validation did not complete runtime reset"
+  assert_log_contains "${RESET_VALIDATION_LOG}" "cleared DDS runtime state after simulator reset" "reset validation cleared DDS runtime state" \
+    || fail "reset validation did not clear DDS runtime state"
+  assert_log_count_at_least "${RESET_VALIDATION_LOG}" "applied deterministic reset state" 2 "reset validation applied canonical reset state at startup and after reset" \
+    || fail "reset validation did not reapply deterministic reset state"
+  log "in-session reset validation passed"
+}
+
 run_long_run_phase() {
   log "phase=long_run_cadence"
   (
@@ -295,6 +337,8 @@ Optional environment variables:
   TRACKING_LOWCMD_JOINT_NAME=waist_yaw_joint
   TRACKING_LOWCMD_OFFSET_RAD=0.05
   TRACKING_LISTENER_START_DELAY_SECONDS=1
+  RESET_AFTER_FRAMES=120
+  RESET_VALIDATION_MAX_FRAMES=240
   LONG_RUN_MAX_FRAMES=2400
   LONG_RUN_CADENCE_INTERVAL=500
   SIM_LOG_TAIL_LINES=120
@@ -319,6 +363,7 @@ run_unit_tests
 run_startup_determinism_phase
 run_smoke_phase
 run_tracking_phase
+run_reset_validation_phase
 run_long_run_phase
 
 log "RESULT: full validation passed."
@@ -332,5 +377,6 @@ log "  ${TRACKING_SIM_LOG}"
 log "  ${TRACKING_LISTENER_LOG}"
 log "  ${TRACKING_LOWCMD_LOG}"
 log "  ${TRACKING_CSV_PATH}"
+log "  ${RESET_VALIDATION_LOG}"
 log "  ${LONG_RUN_LOG}"
 log "  ${SUMMARY_LOG}"

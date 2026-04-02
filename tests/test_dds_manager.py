@@ -17,6 +17,11 @@ from dds.manager import DdsManager
 class _FakeLowCmdSubscriber:
     def __init__(self, latest_command=None):
         self.latest_command = latest_command
+        self.clear_calls = 0
+
+    def clear_cached_command(self):
+        self.latest_command = None
+        self.clear_calls += 1
 
 
 class _FakeLowStatePublisher:
@@ -40,6 +45,7 @@ def _build_config(**overrides) -> AppConfig:
         width=1280,
         height=720,
         max_frames=0,
+        reset_after_frames=0,
         print_all_joints=False,
         enable_dds=True,
         dds_domain_id=1,
@@ -145,6 +151,34 @@ class DdsManagerTests(unittest.TestCase):
             [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12],
         )
         self.assertEqual(manager._lowstate_publisher.publish_calls, len(published_frames))
+
+    def test_reset_runtime_state_clears_transient_dds_state(self):
+        manager = DdsManager(_build_config())
+        cached = LowCmdCache(
+            mode_pr=0,
+            mode_machine=0,
+            joint_positions_dds=tuple([0.0] * 29),
+            joint_velocities_dds=tuple([0.0] * 29),
+            joint_torques_dds=tuple([0.0] * 29),
+            joint_kp_dds=tuple([0.0] * 29),
+            joint_kd_dds=tuple([0.0] * 29),
+            received_at_monotonic=time.monotonic(),
+        )
+        subscriber = _FakeLowCmdSubscriber(latest_command=cached)
+        manager._lowcmd_subscriber = subscriber
+        manager._warned_stale_lowcmd = True
+        manager._next_lowstate_publish_time = 12.5
+        manager._cadence.window_start_time = 5.0
+        manager._cadence.publish_count = 10
+
+        manager.reset_runtime_state()
+
+        self.assertIsNone(subscriber.latest_command)
+        self.assertEqual(subscriber.clear_calls, 1)
+        self.assertFalse(manager._warned_stale_lowcmd)
+        self.assertEqual(manager._next_lowstate_publish_time, 0.0)
+        self.assertIsNone(manager._cadence.window_start_time)
+        self.assertEqual(manager._cadence.publish_count, 0)
 
 
 if __name__ == "__main__":

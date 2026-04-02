@@ -22,6 +22,10 @@ class _FakeArticulation:
         self.last_set_positions = None
         self.last_set_velocities = None
         self.last_set_efforts = None
+        self.initialize_calls = 0
+
+    def initialize(self):
+        self.initialize_calls += 1
 
     def get_joint_positions(self):
         return self._positions
@@ -123,6 +127,23 @@ class RobotStatePauseSafeTests(unittest.TestCase):
         self.assertEqual(articulation.last_set_velocities, [0.0, 0.0])
         self.assertEqual(articulation.last_set_efforts, [0.0, 0.0])
         self.assertIsNot(reader._imu, original_imu)
+
+    def test_reinitialize_after_world_reset_rebinds_articulation(self):
+        articulation = _FakeArticulation(
+            dof_names=["joint_a", "joint_b"],
+            positions=[0.1, 0.2],
+            velocities=[0.0, 0.0],
+            efforts=[0.0, 0.0],
+        )
+        reader = self._make_reader(articulation)
+        reader._initialized = False
+        reader._warned_physics_view_unavailable = True
+
+        reader.reinitialize_after_world_reset()
+
+        self.assertEqual(articulation.initialize_calls, 1)
+        self.assertTrue(reader._initialized)
+        self.assertFalse(reader._warned_physics_view_unavailable)
 
 
 if __name__ == "__main__":

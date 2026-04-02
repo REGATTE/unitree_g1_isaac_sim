@@ -939,5 +939,64 @@
 
 - Remaining validation gaps that are still outside the automated harness:
   - external Unitree SDK-client compatibility proof
-  - explicit in-session reset semantics
   - stronger controller-quality evaluation beyond conservative transport/tracking checks
+
+## ===================================================================================================================================
+
+## 2026-04-02 Deterministic Reset Semantics Completed
+
+- Returned to `feat/deterministic-startup-reset` after the validation-harness merge and closed the remaining branch gap:
+  - deterministic startup was already implemented
+  - deterministic in-session reset semantics were still missing
+
+- Added a real in-session reset path to the runtime.
+  - `src/config.py`
+    - added `--reset-after-frames` as a one-shot validation trigger for runtime reset
+  - `src/main.py`
+    - added a dedicated runtime reset path that:
+      - calls `world.reset()`
+      - reinitializes the articulation wrapper
+      - reapplies the canonical deterministic reset state
+      - clears DDS runtime state
+  - `src/robot_state.py`
+    - generalized the startup helper into reusable deterministic reset state application
+    - added articulation rebind support after world reset
+  - `src/dds/g1_lowcmd.py`
+    - added lowcmd cache clearing support
+  - `src/dds/manager.py`
+    - added DDS runtime reset-state clearing for:
+      - cached lowcmd state
+      - stale-command warning latch
+      - cadence tracker window
+      - next lowstate publish target
+
+- Extended tests for reset semantics.
+  - `tests/test_robot_state_pause_safe.py`
+    - covers articulation rebind behavior after reset
+    - covers deterministic reset-state application on the articulation wrapper
+  - `tests/test_dds_manager.py`
+    - covers DDS runtime state clearing on reset
+
+- Extended the full validation harness to cover reset explicitly.
+  - `scripts/run_full_validation.sh` now includes:
+    - an in-session reset validation phase
+  - `Agents/full_validation.md` and `README.md` now reflect that reset validation is part of the harness instead of future work.
+
+- Live validation status.
+  - Manual reset-only validation succeeded with the expected runtime markers:
+    - deterministic reset state applied at startup
+    - runtime reset triggered
+    - deterministic reset state reapplied after reset
+    - DDS runtime state cleared
+    - reset completion logged
+  - Full validation subsequently passed end-to-end on this branch with:
+    - `RESULT: full validation passed.`
+
+## Next Steps From Here
+
+- This branch now covers the intended startup/reset scope and is ready for merge review.
+
+- The remaining larger-scope items are outside this branch’s core purpose:
+  - external Unitree SDK-client compatibility proof
+  - optional hand DDS topics (`dex1`, `dex3`, `inspire`)
+  - stronger controller-quality evaluation beyond the current conservative validation harness

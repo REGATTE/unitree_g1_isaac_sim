@@ -37,6 +37,7 @@ class AppConfig:
     width: int
     height: int
     max_frames: int
+    reset_after_frames: int
     print_all_joints: bool
     enable_dds: bool
     dds_domain_id: int
@@ -127,6 +128,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Stop after N Kit frames. Use 0 to run until the app closes.",
     )
     parser.add_argument(
+        "--reset-after-frames",
+        type=int,
+        default=0,
+        help=(
+            "Trigger one deterministic runtime reset after N simulation frames. "
+            "Use 0 to disable. Primarily intended for reset validation."
+        ),
+    )
+    parser.add_argument(
         "--print-all-joints",
         action="store_true",
         help="Print the full articulation joint list during startup validation.",
@@ -215,6 +225,7 @@ def parse_config(argv: list[str] | None = None) -> AppConfig:
         width=args.width,
         height=args.height,
         max_frames=args.max_frames,
+        reset_after_frames=args.reset_after_frames,
         print_all_joints=args.print_all_joints,
         enable_dds=args.enable_dds,
         dds_domain_id=args.dds_domain_id,

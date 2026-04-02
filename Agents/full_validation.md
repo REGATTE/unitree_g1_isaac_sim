@@ -102,6 +102,32 @@ Pass criteria:
 
 ### 5. Longer Cadence Run
 
+### 5. In-Session Reset Validation
+
+Purpose:
+
+- prove that a live runtime reset returns the simulator to the same canonical
+  deterministic state shape as startup
+- prove that transient DDS runtime state is cleared at reset time
+
+Covered by:
+
+- one bounded headless DDS run with:
+  - `--reset-after-frames`
+  - `--max-frames`
+
+Pass criteria:
+
+- simulator log contains:
+  - `triggering deterministic runtime reset`
+  - `deterministic runtime reset complete`
+  - `cleared DDS runtime state after simulator reset`
+- the log shows `applied deterministic reset state` at least twice:
+  - once at startup
+  - once after the live reset
+
+### 6. Longer Cadence Run
+
 Purpose:
 
 - confirm cadence diagnostics still appear over a longer bounded run
@@ -144,18 +170,6 @@ Status:
 
 - not currently automated by the full-validation harness
 - still recommended before calling a release "fully validated"
-
-### 3. Explicit In-Session Reset Validation
-
-Purpose:
-
-- prove that a runtime reset path returns the simulator to the same canonical
-  state, not just a fresh-launch startup path
-
-Status:
-
-- startup determinism is implemented and covered
-- a dedicated in-session reset entrypoint is still future work
 
 ## Recommended Command
 

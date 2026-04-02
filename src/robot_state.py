@@ -150,6 +150,12 @@ class RobotStateReader:
         self._articulation.initialize()
         self._initialized = True
 
+    def reinitialize_after_world_reset(self) -> None:
+        """Rebind the articulation view after an in-session world reset."""
+        self._articulation.initialize()
+        self._initialized = True
+        self._warned_physics_view_unavailable = False
+
     def apply_deterministic_startup_state(self) -> bool:
         """Force a known articulation state before the first DDS-visible sample.
 
@@ -158,10 +164,14 @@ class RobotStateReader:
         than relying on whatever residual articulation buffers or prior scene
         state Isaac Sim may expose after stage and physics initialization.
         """
+        return self.apply_deterministic_reset_state()
+
+    def apply_deterministic_reset_state(self) -> bool:
+        """Force the canonical zeroed articulation state during runtime reset."""
         self._require_initialized()
         joint_count = len(self.joint_names)
         if joint_count == 0:
-            raise RuntimeError("Cannot apply deterministic startup state without articulation joints.")
+            raise RuntimeError("Cannot apply deterministic reset state without articulation joints.")
 
         zero_positions = [0.0] * joint_count
         zero_velocities = [0.0] * joint_count
@@ -190,16 +200,17 @@ class RobotStateReader:
         # Startup/reset semantics should also clear transient estimators so the
         # next IMU sample is derived from the canonical startup state.
         self._imu = ImuEmulator()
+        self._warned_physics_view_unavailable = False
 
         applied = positions_applied or velocities_applied
         if applied:
             LOGGER.info(
-                "applied deterministic startup state: joint_positions=0 joint_velocities=0 joint_count=%s",
+                "applied deterministic reset state: joint_positions=0 joint_velocities=0 joint_count=%s",
                 joint_count,
             )
         else:
             LOGGER.warning(
-                "deterministic startup state requested, but no articulation joint position/velocity setter "
+                "deterministic reset state requested, but no articulation joint position/velocity setter "
                 "is available; continuing with the runtime-provided initial state."
             )
         return applied

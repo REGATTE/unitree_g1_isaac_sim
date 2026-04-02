@@ -170,6 +170,14 @@ class DdsManager:
         self._next_lowstate_publish_time = 0.0
         self._cadence = CadenceTracker()
 
+    def reset_runtime_state(self) -> None:
+        """Clear transient DDS runtime state after an in-session simulator reset."""
+        self._lowcmd_subscriber.clear_cached_command()
+        self._warned_stale_lowcmd = False
+        self._next_lowstate_publish_time = 0.0
+        self._cadence = CadenceTracker()
+        LOGGER.info("cleared DDS runtime state after simulator reset")
+
     def _resolve_latest_lowcmd(self, now_monotonic: float) -> LowCmdCache | None:
         """Return the current fresh lowcmd sample or `None` if stale/absent."""
         cached = self._lowcmd_subscriber.latest_command

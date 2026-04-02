@@ -131,6 +131,7 @@ What it does:
 - checks deterministic startup snapshots across two fresh simulator launches
 - runs the automated DDS smoke test
 - runs a conservative command-tracking capture with CSV export
+- runs an explicit in-session deterministic reset validation phase
 - verifies stale lowcmd timeout behavior
 - runs a longer bounded cadence check
 - writes logs under `tmp/full_validation_logs/`
@@ -149,6 +150,7 @@ Useful environment overrides:
 - `STARTUP_MAX_FRAMES=300`
 - `TRACKING_LOWCMD_JOINT_NAME=waist_yaw_joint`
 - `TRACKING_LOWCMD_OFFSET_RAD=0.05`
+- `RESET_AFTER_FRAMES=120`
 - `LONG_RUN_MAX_FRAMES=2400`
 
 The detailed checklist for what this harness covers lives in:
