@@ -3,32 +3,6 @@ A unitree G1 based simulation, to mimic the Cyclone DDS layer, on IsaacSim.
 
 ## Setup
 
-### Install Cyclone DDS
-
-```bash
-# Home Folder
-git clone https://github.com/eclipse-cyclonedds/cyclonedds -b releases/0.10.x
-mkdir -p build install
-cd build
-cmake .. -DCMAKE_INSTALL_PREFIX=../install
-cmake --build . --target install
-cd ..
-
-echo 'export CYCLONEDDS_HOME=$HOME/cyclonedds/install' >> ~/.bashrc
-echo 'export CMAKE_PREFIX_PATH=$CYCLONEDDS_HOME:$CMAKE_PREFIX_PATH' >> ~/.bashrc
-
-source ~/.bashrccd
-```
-
-### Install Unitree_sdk2_python
-
-```bash
-# Home FOlder
-git clone https://github.com/unitreerobotics/unitree_sdk2_python.git
-cd unitree_sdk2_python
-pip3 install -e .
-```
-
 ### Setup Isaac Sim Paths
 
 ```bash
@@ -44,6 +18,33 @@ export ISAACSIM_PYTHON_EXE="${ISAACSIM_PATH}/python.sh"
 alias isaac_sim="cd ${ISAACSIM_PATH} && ./isaac-sim.sh"
 alias isaac_sim_python="${ISAACSIM_PYTHON_EXE}"
 ```
+
+### Install Cyclone DDS
+
+```bash
+# Home Folder
+git clone https://github.com/eclipse-cyclonedds/cyclonedds -b releases/0.10.x
+mkdir -p build install
+cd build
+cmake .. -DCMAKE_INSTALL_PREFIX=../install
+cmake --build . --target install
+cd ..
+
+echo 'export CYCLONEDDS_HOME=$HOME/cyclonedds/install' >> ~/.bashrc
+echo 'export CMAKE_PREFIX_PATH=$CYCLONEDDS_HOME:$CMAKE_PREFIX_PATH' >> ~/.bashrc
+
+source ~/.bashrc
+```
+
+### Install Unitree_sdk2_python
+
+```bash
+# Home FOlder
+git clone https://github.com/unitreerobotics/unitree_sdk2_python.git
+cd unitree_sdk2_python
+isaac_sim_python -m pip3 install -e .
+```
+
 
 ## Usage
 
@@ -79,18 +80,81 @@ isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py
 | `--lowstate-topic` | DDS topic used for low-level state publication. | `rt/lowstate` |  `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --enable-dds --lowstate-topic rt/lowstate` |
 | `--lowcmd-topic` | DDS topic used for low-level command subscription. | `rt/lowcmd` |  `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --enable-dds --lowcmd-topic rt/lowcmd` |
 | `--lowstate-publish-hz` | Target DDS publish rate for `rt/lowstate`. | `100.0` |  `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --enable-dds --lowstate-publish-hz 100` |
-| `--enable-lowcmd-subscriber` | Create the `rt/lowcmd` subscriber skeleton. Command application into Isaac Sim is still a follow-up step. | `False` |  `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --enable-dds --enable-lowcmd-subscriber` |
+| `--enable-lowcmd-subscriber` | Create the `rt/lowcmd` subscriber and apply cached body commands into the articulation. | `False` |  `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --enable-dds --enable-lowcmd-subscriber` |
 
 Important DDS note:
 
 - The intent of this project is to make Isaac Sim look like a real G1 at the DDS boundary.
 - The simulator should publish the same low-level topics a real robot publishes so higher-level clients such as `unitree_sdk2` or `unitree_ros2` can run on top without simulator-specific adaptations.
-- The current implementation slice focuses on `rt/lowstate` publication first.
-- The `rt/lowcmd` subscriber object now exists, but applying incoming commands back into Isaac Sim remains a follow-up step.
+- The current baseline DDS path on `dds_dev` is:
+  - publish `rt/lowstate`
+  - subscribe to `rt/lowcmd`
+  - apply cached body commands back into the articulation
+- The current control slice should still be treated primarily as a conservative position-command path.
+- Dynamic `kp` / `kd` application is not implemented yet.
 - The current DDS manager runs inside the same Isaac Sim process and main simulation loop.
 - This is intentionally simpler than the Isaac Lab reference, which uses a heavier shared-memory and threaded structure between simulation state production and DDS I/O.
 - The direct single-process path keeps the current simulator easier to read and debug while DDS compatibility is still being established.
 - A threaded/shared-memory DDS decoupling layer can be added later if tighter runtime isolation or more flexible producer/consumer separation becomes necessary.
+
+## Baseline DDS Smoke Test
+
+This is the current baseline external DDS validation flow for the repo.
+
+Open one terminal and launch Isaac Sim with DDS enabled:
+
+```bash
+cd ~/path/to/unitree_g1_isaac_sim
+isaac_sim_python src/main.py --enable-dds --enable-lowcmd-subscriber
+```
+
+Open a second terminal, activate an environment that has `unitree_sdk2py`,
+and confirm `rt/lowstate` is visible externally:
+
+```bash
+cd ~/path/to/unitree_g1_isaac_sim
+python3 scripts/lowstate_listener.py --dds-domain-id 1 --duration 5
+```
+
+Expected result:
+
+- `tick` increases
+- `crc_rejected=0`
+- joint positions, velocities, torques, and IMU values are populated
+
+Then send one conservative body-joint command:
+
+```bash
+cd ~/path/to/unitree_g1_isaac_sim
+python3 scripts/send_lowcmd_offset.py \
+  --dds-domain-id 1 \
+  --joint-name left_shoulder_pitch_joint \
+  --offset-rad 0.10 \
+  --duration 2.0
+```
+
+Safer first-motion alternative:
+
+```bash
+python3 scripts/send_lowcmd_offset.py \
+  --dds-domain-id 1 \
+  --joint-name waist_yaw_joint \
+  --offset-rad 0.05 \
+  --duration 1.5
+```
+
+Expected result:
+
+- Isaac Sim reports that `rt/lowcmd` was received
+- the targeted joint moves conservatively in the simulator
+- the motion is reflected back on the next `rt/lowstate` samples
+
+Notes:
+
+- Start with small offsets only.
+- Keep the DDS domain id matched across the simulator and test scripts.
+- If `isaac_sim_python` says `unitree_sdk2py` is unavailable, install it into Isaac Sim's Python, not only into your separate local test environment.
+- The current `dds_dev` branch baseline test already validates the external DDS path, but wider incoming `LowCmd_` message widths still need the follow-up width-handling fix branch to be merged.
 
 ## TODO
 
@@ -108,12 +172,12 @@ Important DDS note:
 - [x] Add the DDS bridge package under `src/dds/`
 - [x] Implement `rt/lowstate` publication using Unitree SDK2 `LowState_`
 - [x] Implement `rt/lowcmd` subscription using Unitree SDK2 `LowCmd_`
-- [ ] Apply incoming low-level body commands back into simulator joint order
+- [x] Apply incoming low-level body commands back into simulator joint order
 - [x] Add CRC handling on live DDS publish/subscribe paths
 - [ ] Verify publish cadence and runtime behavior against the real G1 DDS contract
 - [ ] Add an optional threaded/shared-memory DDS decoupling layer if runtime isolation is needed
 - [ ] Add optional hand/gripper DDS bridges if needed for dex1, dex3, and inspire
 - [ ] Add reset/simulator-state utility DDS topics if needed
-- [ ] Test the external client path with a real Unitree SDK-based DDS client
+- [x] Test the external client path with a standalone Unitree SDK-based DDS client
 - [ ] Properly support the `23dof` variant instead of leaving it as unverified
 - [ ] Decide on and implement the final deterministic startup/reset pose strategy

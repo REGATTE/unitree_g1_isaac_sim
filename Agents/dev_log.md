@@ -364,3 +364,59 @@
   - the simulator stays alive
   - the commanded body joint moves
   - the motion is reflected back on `rt/lowstate`
+
+## ===================================================================================================================================
+
+## 2026-04-01 DDS Baseline Test Reconciliation
+
+- Re-read `Agents/implementation_plan.md` and reconciled the current DDS branch state against the planned implementation phases.
+  - Phase 1 is effectively frozen for the baseline body DDS contract:
+    - `rt/lowstate`
+    - `rt/lowcmd`
+    - Unitree SDK2 message classes
+    - CRC handling
+    - 29-DoF body joint ordering
+  - Phase 4 is externally validated for the outgoing `rt/lowstate` path.
+  - Phase 5 is partially validated for the incoming `rt/lowcmd` path:
+    - command traffic reaches the simulator
+    - the body-command application path exists on `dds_dev`
+    - one remaining DDS-boundary width issue was discovered during external testing
+
+- Confirmed the current baseline DDS smoke test on `dds_dev`.
+  - Launch Isaac Sim with:
+    - `--enable-dds`
+    - `--enable-lowcmd-subscriber`
+  - Use a standalone `unitree_sdk2py` listener to verify:
+    - `rt/lowstate` is externally visible
+    - CRC passes on the receive path
+    - joint and IMU fields are populated
+  - Use a standalone `unitree_sdk2py` publisher to send one conservative body-joint command on `rt/lowcmd`.
+
+- Confirmed what the baseline test now proves for this repo.
+  - An external Unitree SDK-based client can subscribe to simulator `rt/lowstate`.
+  - An external Unitree SDK-based client can publish simulator `rt/lowcmd`.
+  - The direct single-process Isaac Sim DDS design is now externally validated for the basic body DDS path, which is the central contract defined in the implementation plan.
+
+- Clarified the current branch limitation after reconciliation.
+  - The external `LowCmd_` path still exposes a 35-slot message shape.
+  - The current `dds_dev` mapping layer still expects exactly 29 body-joint slots at the DDS boundary.
+  - A focused follow-up branch was created to clamp incoming lowcmd parsing to the supported 29 body joints and avoid this crash.
+  - That width-handling fix is still a merge follow-up relative to this `dds_dev` log state.
+
+- Documentation implication from this round.
+  - README should now present the standalone listener/publisher sequence as the baseline DDS smoke test for the repo.
+  - README wording should reflect that body-command application exists on `dds_dev`, even though wider incoming `LowCmd_` widths still need the follow-up fix branch.
+
+## Resume Here
+
+- Re-run the baseline DDS smoke test after that merge:
+  - listener on `rt/lowstate`
+  - conservative publisher on `rt/lowcmd`
+- Confirm on `dds_dev` that:
+  - the simulator stays alive on the 35-slot `LowCmd_` shape
+  - the commanded body joint moves in Isaac Sim
+  - the motion is reflected back on `rt/lowstate`
+- After that, decide whether the next follow-up should be:
+  - dynamic `kp` / `kd` application
+  - stricter publish-rate validation
+  - optional hand DDS topics
