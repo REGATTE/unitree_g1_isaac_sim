@@ -150,6 +150,60 @@ class RobotStateReader:
         self._articulation.initialize()
         self._initialized = True
 
+    def apply_deterministic_startup_state(self) -> bool:
+        """Force a known articulation state before the first DDS-visible sample.
+
+        The current baseline runtime assumes the G1 should start from a
+        canonical zero joint-position / zero joint-velocity body state rather
+        than relying on whatever residual articulation buffers or prior scene
+        state Isaac Sim may expose after stage and physics initialization.
+        """
+        self._require_initialized()
+        joint_count = len(self.joint_names)
+        if joint_count == 0:
+            raise RuntimeError("Cannot apply deterministic startup state without articulation joints.")
+
+        zero_positions = [0.0] * joint_count
+        zero_velocities = [0.0] * joint_count
+        zero_efforts = [0.0] * joint_count
+
+        positions_applied = False
+        velocities_applied = False
+
+        if hasattr(self._articulation, "set_joint_positions"):
+            self._articulation.set_joint_positions(zero_positions)
+            positions_applied = True
+        elif hasattr(self._articulation, "set_joint_position_targets"):
+            self._articulation.set_joint_position_targets(zero_positions)
+            positions_applied = True
+
+        if hasattr(self._articulation, "set_joint_velocities"):
+            self._articulation.set_joint_velocities(zero_velocities)
+            velocities_applied = True
+        elif hasattr(self._articulation, "set_joint_velocity_targets"):
+            self._articulation.set_joint_velocity_targets(zero_velocities)
+            velocities_applied = True
+
+        if hasattr(self._articulation, "set_joint_efforts"):
+            self._articulation.set_joint_efforts(zero_efforts)
+
+        # Startup/reset semantics should also clear transient estimators so the
+        # next IMU sample is derived from the canonical startup state.
+        self._imu = ImuEmulator()
+
+        applied = positions_applied or velocities_applied
+        if applied:
+            LOGGER.info(
+                "applied deterministic startup state: joint_positions=0 joint_velocities=0 joint_count=%s",
+                joint_count,
+            )
+        else:
+            LOGGER.warning(
+                "deterministic startup state requested, but no articulation joint position/velocity setter "
+                "is available; continuing with the runtime-provided initial state."
+            )
+        return applied
+
     @property
     def joint_names(self) -> list[str]:
         names = getattr(self._articulation, "dof_names", None)

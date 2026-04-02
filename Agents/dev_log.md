@@ -824,3 +824,64 @@
 - Verified during this round:
   - `python3 -m unittest tests/test_lowstate_listener.py`
   - `python3 -m py_compile scripts/lowstate_listener.py tests/test_lowstate_listener.py`
+
+
+## ===================================================================================================================================
+
+## 2026-04-02 Current Main Branch State
+
+- Re-read `Agents/implementation_plan.md` against the current `main` branch head.
+
+- `main` now includes the baseline DDS simulator work plus the later operational-polish follow-ups.
+  - Landed baseline/body DDS surface on `main`:
+    - Isaac Sim bootstrap and G1 scene/runtime setup
+    - validated 29-DoF simulator-order <-> DDS-order body mapping
+    - `rt/lowstate` publication
+    - `rt/lowcmd` subscription and simulator command application
+    - dynamic `kp` / `kd`
+    - stale-command handling
+    - non-reanchoring lowstate publish scheduling
+    - cadence diagnostics
+    - pause-safe articulation/runtime behavior
+    - richer lowstate listener tooling with CSV export
+    - tightened CLI/config validation on key rate/dt arguments
+
+- `main` also now includes the newer runtime/logging and smoke-test work.
+  - Added repo-level runtime logging:
+    - shared logging setup in `src/runtime_logging.py`
+    - core runtime modules under `src/` now emit named logger output instead of mixed `print(...)`
+    - lowcmd startup visibility now uses the same runtime logging path as the rest of DDS startup
+  - Added automated DDS smoke validation:
+    - `scripts/run_dds_smoke_test.sh`
+    - end-to-end readiness checks for:
+      - DDS channel factory startup
+      - lowstate publisher readiness
+      - lowcmd subscriber readiness
+      - external lowstate reception
+      - external lowcmd publication / reception
+      - zero CRC rejection in the listener path
+    - explicit final verdict:
+      - `RESULT: DDS communication working end-to-end.`
+
+- Current practical status of the repo.
+  - The implementation plan still matches the codebase well:
+    - thin `main.py`
+    - explicit scene/runtime separation
+    - explicit mapping layer
+    - robot-state / robot-control ownership split
+    - single-process DDS bridge model
+  - The project is now beyond “DDS bring-up only” and has a usable operator-facing validation path built into the repo.
+  - The automated smoke test has already been run successfully against the current runtime and produced a passing end-to-end DDS result.
+
+## Next Steps From Current `main`
+
+- Closest likely project-level next steps:
+  - document or tag a clearer baseline/pre-release from `main`
+  - add optional hand DDS topics (`dex1`, `dex3`, `inspire`)
+  - implement deterministic startup/reset semantics
+  - add stronger controller-quality validation beyond transport-level DDS smoke tests
+
+- Short-term validation direction:
+  - keep using the smoke-test harness for regression checking after DDS/runtime changes
+  - continue using the CSV-capable lowstate listener when comparing gain or joint-response behavior over time
+

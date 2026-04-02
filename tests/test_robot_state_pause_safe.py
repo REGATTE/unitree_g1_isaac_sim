@@ -19,6 +19,9 @@ class _FakeArticulation:
         self._efforts = efforts
         self.last_kps = None
         self.last_kds = None
+        self.last_set_positions = None
+        self.last_set_velocities = None
+        self.last_set_efforts = None
 
     def get_joint_positions(self):
         return self._positions
@@ -32,6 +35,18 @@ class _FakeArticulation:
     def set_gains(self, kps=None, kds=None):
         self.last_kps = kps
         self.last_kds = kds
+
+    def set_joint_positions(self, values):
+        self.last_set_positions = list(values)
+        self._positions = list(values)
+
+    def set_joint_velocities(self, values):
+        self.last_set_velocities = list(values)
+        self._velocities = list(values)
+
+    def set_joint_efforts(self, values):
+        self.last_set_efforts = list(values)
+        self._efforts = list(values)
 
 
 class RobotStatePauseSafeTests(unittest.TestCase):
@@ -89,6 +104,25 @@ class RobotStatePauseSafeTests(unittest.TestCase):
         self.assertEqual(articulation.last_kds.shape, (1, 2))
         self.assertEqual(articulation.last_kps.tolist(), [[10.0, 20.0]])
         self.assertEqual(articulation.last_kds.tolist(), [[1.0, 2.0]])
+
+    def test_deterministic_startup_state_zeroes_joint_state_and_resets_imu(self):
+        articulation = _FakeArticulation(
+            dof_names=["joint_a", "joint_b"],
+            positions=[0.1, 0.2],
+            velocities=[1.0, -1.0],
+            efforts=[0.3, -0.4],
+        )
+        reader = self._make_reader(articulation)
+        original_imu = object()
+        reader._imu = original_imu
+
+        applied = reader.apply_deterministic_startup_state()
+
+        self.assertTrue(applied)
+        self.assertEqual(articulation.last_set_positions, [0.0, 0.0])
+        self.assertEqual(articulation.last_set_velocities, [0.0, 0.0])
+        self.assertEqual(articulation.last_set_efforts, [0.0, 0.0])
+        self.assertIsNot(reader._imu, original_imu)
 
 
 if __name__ == "__main__":

@@ -97,6 +97,7 @@ def initialize_robot_state_reader(config: AppConfig) -> RobotStateReader:
 
     state_reader = RobotStateReader(config.robot_prim_path)
     state_reader.initialize()
+    state_reader.apply_deterministic_startup_state()
     kinematic_snapshot = state_reader.read_kinematic_snapshot(sample_dt=config.physics_dt)
     log_kinematic_snapshot(kinematic_snapshot)
     sim_snapshot = JointStateSnapshot(
