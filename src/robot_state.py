@@ -11,10 +11,21 @@ from dataclasses import dataclass
 import math
 from typing import Sequence
 
+import numpy as np
+
 
 _GRAVITY_MAGNITUDE_MPS2 = 9.81
 _WORLD_GRAVITY_VECTOR = (0.0, 0.0, -_GRAVITY_MAGNITUDE_MPS2)
 _WORLD_PROPER_ACCELERATION_AT_REST = (0.0, 0.0, _GRAVITY_MAGNITUDE_MPS2)
+
+
+class PhysicsViewUnavailableError(RuntimeError):
+    """Raised when Isaac Sim temporarily stops exposing articulation physics data.
+
+    This can happen while the simulator is paused or shutting down. Callers
+    should treat it as a recoverable runtime condition and skip the affected
+    frame instead of terminating the application.
+    """
 
 
 @dataclass(frozen=True)
@@ -114,7 +125,14 @@ def import_articulation():
 
 
 class RobotStateReader:
-    """Thin articulation wrapper for reading simulator joint state."""
+    """Thin articulation wrapper for reading and commanding simulator joints.
+
+    The first development slices in this repository focused on reliable state
+    extraction. The DDS command path now reuses the same articulation wrapper
+    so joint-order assumptions stay localized and the rest of the codebase does
+    not need to know which Isaac Sim articulation methods are available in a
+    given runtime version.
+    """
 
     def __init__(self, robot_prim_path: str) -> None:
         Articulation = import_articulation()
@@ -122,6 +140,7 @@ class RobotStateReader:
         self._articulation = Articulation(prim_paths_expr=robot_prim_path, name="unitree_g1")
         self._initialized = False
         self._imu = ImuEmulator()
+        self._warned_physics_view_unavailable = False
 
     def initialize(self) -> None:
         if self._initialized:
@@ -187,17 +206,170 @@ class RobotStateReader:
             imu_angular_velocity_body=imu_angular_velocity_body,
         )
 
+    def apply_joint_position_targets(self, joint_positions: Sequence[float]) -> bool:
+        """Apply a full-body joint-position target vector in simulator order.
+
+        Returns `True` when a target setter is found on the articulation.
+        Falls back to `set_joint_positions()` only if a dedicated target API is
+        unavailable in the current Isaac Sim runtime.
+        """
+        return self._apply_joint_vector(
+            joint_positions,
+            label="joint_positions",
+            primary_method="set_joint_position_targets",
+            fallback_method="set_joint_positions",
+        )
+
+    def apply_joint_velocity_targets(self, joint_velocities: Sequence[float]) -> bool:
+        """Apply a full-body joint-velocity target vector in simulator order."""
+        return self._apply_joint_vector(
+            joint_velocities,
+            label="joint_velocities",
+            primary_method="set_joint_velocity_targets",
+            fallback_method="set_joint_velocities",
+        )
+
+    def apply_joint_efforts(self, joint_efforts: Sequence[float]) -> bool:
+        """Apply a full-body joint-effort vector in simulator order."""
+        return self._apply_joint_vector(
+            joint_efforts,
+            label="joint_efforts",
+            primary_method="set_joint_efforts",
+        )
+
+    def apply_joint_gains(self, joint_kp: Sequence[float], joint_kd: Sequence[float]) -> bool:
+        """Apply full-body PD gains in simulator joint order.
+
+        Unitree `kp` and `kd` are mapped directly onto Isaac Sim articulation
+        stiffness and damping. The primary path uses `Articulation.set_gains`,
+        which is the stable API exposed by the current Isaac Sim runtime. A
+        controller-level fallback is kept for compatibility with runtimes that
+        only expose gain updates through `get_articulation_controller()`.
+        """
+        self._require_initialized()
+        self._require_physics_view_ready()
+        joint_count = len(self.joint_names)
+        normalized_kp = _validate_joint_command_width(joint_kp, joint_count, "joint_kp")
+        normalized_kd = _validate_joint_command_width(joint_kd, joint_count, "joint_kd")
+
+        if hasattr(self._articulation, "set_gains"):
+            self._articulation.set_gains(
+                kps=np.expand_dims(np.asarray(normalized_kp, dtype=np.float32), axis=0),
+                kds=np.expand_dims(np.asarray(normalized_kd, dtype=np.float32), axis=0),
+            )
+            return True
+
+        if hasattr(self._articulation, "get_articulation_controller"):
+            controller = self._articulation.get_articulation_controller()
+            if controller is not None and hasattr(controller, "set_gains"):
+                controller.set_gains(
+                    kps=np.asarray(normalized_kp, dtype=np.float32),
+                    kds=np.asarray(normalized_kd, dtype=np.float32),
+                )
+                return True
+
+        return False
+
     def _require_initialized(self) -> None:
         if not self._initialized:
             raise RuntimeError("RobotStateReader must be initialized before reading state.")
 
     def _read_joint_state(self):
-        joint_positions = self._articulation.get_joint_positions()
-        joint_velocities = self._articulation.get_joint_velocities()
-        joint_efforts = None
-        if hasattr(self._articulation, "get_measured_joint_efforts"):
-            joint_efforts = self._articulation.get_measured_joint_efforts()
-        return joint_positions, joint_velocities, joint_efforts
+        return self._ensure_physics_view_ready(require_velocities=True, require_efforts=True)
+
+    def _require_physics_view_ready(self) -> None:
+        """Fail fast when the articulation loses its live physics view."""
+        self._ensure_physics_view_liveness()
+
+    def _apply_joint_vector(
+        self,
+        values: Sequence[float],
+        *,
+        label: str,
+        primary_method: str,
+        fallback_method: str | None = None,
+    ) -> bool:
+        self._require_initialized()
+        self._require_physics_view_ready()
+        normalized = _validate_joint_command_width(values, len(self.joint_names), label)
+
+        if hasattr(self._articulation, primary_method):
+            getattr(self._articulation, primary_method)(normalized)
+            return True
+
+        if fallback_method is not None and hasattr(self._articulation, fallback_method):
+            getattr(self._articulation, fallback_method)(normalized)
+            return True
+
+        return False
+
+    def _ensure_physics_view_ready(
+        self,
+        *,
+        require_velocities: bool = False,
+        require_efforts: bool = False,
+    ) -> tuple[list[float], list[float] | None, list[float] | None]:
+        expected_joint_count = len(self.joint_names)
+        if expected_joint_count == 0:
+            self._raise_physics_view_unavailable("articulation joint names are unavailable")
+
+        positions = _to_float_list(self._articulation.get_joint_positions())
+        velocities = None
+        efforts = None
+
+        if require_velocities:
+            velocities = _to_float_list(self._articulation.get_joint_velocities())
+        if require_efforts and hasattr(self._articulation, "get_measured_joint_efforts"):
+            efforts = _to_float_list(self._articulation.get_measured_joint_efforts())
+
+        if len(positions) != expected_joint_count:
+            self._raise_physics_view_unavailable(
+                "joint position buffer is unavailable "
+                f"(expected {expected_joint_count}, got {len(positions)})"
+            )
+        if velocities is not None and len(velocities) != expected_joint_count:
+            self._raise_physics_view_unavailable(
+                "joint velocity buffer is unavailable "
+                f"(expected {expected_joint_count}, got {len(velocities)})"
+            )
+        if efforts is not None and len(efforts) not in (0, expected_joint_count):
+            self._raise_physics_view_unavailable(
+                "joint effort buffer width is invalid "
+                f"(expected {expected_joint_count}, got {len(efforts)})"
+            )
+
+        self._mark_physics_view_ready()
+        return positions, velocities, efforts
+
+    def _ensure_physics_view_liveness(self) -> None:
+        """Validate that the articulation physics view is present for control writes."""
+        expected_joint_count = len(self.joint_names)
+        if expected_joint_count == 0:
+            self._raise_physics_view_unavailable("articulation joint names are unavailable")
+
+        positions = self._articulation.get_joint_positions()
+        position_count = len(_to_float_list(positions))
+        if position_count != expected_joint_count:
+            self._raise_physics_view_unavailable(
+                "joint position buffer is unavailable "
+                f"(expected {expected_joint_count}, got {position_count})"
+            )
+        self._mark_physics_view_ready()
+
+    def _raise_physics_view_unavailable(self, reason: str) -> None:
+        if not self._warned_physics_view_unavailable:
+            print(
+                "[unitree_g1_isaac_sim] articulation physics view unavailable; "
+                "skipping joint state/control updates until physics resumes. "
+                f"reason={reason}"
+            )
+            self._warned_physics_view_unavailable = True
+        raise PhysicsViewUnavailableError(reason)
+
+    def _mark_physics_view_ready(self) -> None:
+        if self._warned_physics_view_unavailable:
+            print("[unitree_g1_isaac_sim] articulation physics view restored; resuming DDS/state updates.")
+        self._warned_physics_view_unavailable = False
 
     def _read_world_pose(self) -> tuple[list[float], list[float]]:
         """Read the base world pose from Isaac Sim.
@@ -207,7 +379,9 @@ class RobotStateReader:
         math uses the raw Isaac Sim convention directly.
         """
         if not hasattr(self._articulation, "get_world_poses"):
-            return [0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]
+            # Keep the fallback aligned with the documented scalar-first `wxyz`
+            # convention: identity rotation is [1, 0, 0, 0].
+            return [0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]
         positions, orientations = self._articulation.get_world_poses()
         return (
             _to_fixed_float_list(positions, 3, strict=True),
@@ -251,6 +425,18 @@ def _to_fixed_float_list(
     if len(normalized) < expected_length:
         normalized = normalized + [0.0] * (expected_length - len(normalized))
     return normalized[:expected_length]
+
+
+def _validate_joint_command_width(
+    values: Sequence[float],
+    expected_length: int,
+    label: str,
+) -> list[float]:
+    """Normalize and validate a full-width joint command vector."""
+    normalized = [float(value) for value in values]
+    if len(normalized) != expected_length:
+        raise ValueError(f"Expected {expected_length} {label} values, got {len(normalized)}")
+    return normalized
 
 
 def _rotate_world_vector_to_body(vector_world: list[float], quaternion_wxyz: list[float]) -> list[float]:

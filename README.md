@@ -1,31 +1,6 @@
 # unitree_g1_isaac_sim
 A unitree G1 based simulation, to mimic the Cyclone DDS layer, on IsaacSim. 
 
-## TODO
-
-- [x] Standalone Isaac Sim launcher in `src/main.py`
-- [x] Stage/world setup for `/World`, physics scene, ground plane, light, and robot reference
-- [x] Articulation discovery for the G1 robot under `/World/G1`
-- [x] Live joint-state reads for positions, velocities, and efforts
-- [x] Frozen 29-DoF simulator joint order
-- [x] Frozen 29-DoF DDS body joint order
-- [x] Validated simulator-order to DDS-order joint mapping
-- [x] Startup validation that the live articulation still matches the frozen simulator order
-- [x] DDS-ordered joint snapshot preview from the live simulator snapshot
-- [x] Expanded robot-state reader for base position, base quaternion in validated Isaac Sim `wxyz` convention, base linear/angular velocity, and IMU-like body-frame signals
-- [x] Simulation-time based IMU acceleration estimation
-- [ ] Add the DDS bridge package under `src/dds/`
-- [ ] Implement `rt/lowstate` publication using Unitree SDK2 `LowState_`
-- [ ] Implement `rt/lowcmd` subscription using Unitree SDK2 `LowCmd_`
-- [ ] Apply incoming low-level body commands back into simulator joint order
-- [ ] Add CRC handling on live DDS publish/subscribe paths
-- [ ] Verify publish cadence and runtime behavior against the real G1 DDS contract
-- [ ] Add optional hand/gripper DDS bridges if needed for dex1, dex3, and inspire
-- [ ] Add reset/simulator-state utility DDS topics if needed
-- [ ] Test the external client path with a real Unitree SDK-based DDS client
-- [ ] Properly support the `23dof` variant instead of leaving it as unverified
-- [ ] Decide on and implement the final deterministic startup/reset pose strategy
-
 ## Setup
 
 ### Setup Isaac Sim Paths
@@ -44,58 +19,247 @@ alias isaac_sim="cd ${ISAACSIM_PATH} && ./isaac-sim.sh"
 alias isaac_sim_python="${ISAACSIM_PYTHON_EXE}"
 ```
 
-## Run
+### Install Cyclone DDS
+
+```bash
+# Home Folder
+git clone https://github.com/eclipse-cyclonedds/cyclonedds -b releases/0.10.x
+mkdir -p build install
+cd build
+cmake .. -DCMAKE_INSTALL_PREFIX=../install
+cmake --build . --target install
+cd ..
+
+echo 'export CYCLONEDDS_HOME=$HOME/cyclonedds/install' >> ~/.bashrc
+echo 'export CMAKE_PREFIX_PATH=$CYCLONEDDS_HOME:$CMAKE_PREFIX_PATH' >> ~/.bashrc
+
+source ~/.bashrc
+```
+
+### Install Unitree_sdk2_python
+
+```bash
+# Home Folder
+git clone https://github.com/unitreerobotics/unitree_sdk2_python.git
+cd unitree_sdk2_python
+isaac_sim_python -m pip3 install -e .
+```
+
+
+## Usage
 
 This package currently uses a standalone Isaac Sim Python entrypoint.
 That means it should be launched with Isaac Sim's `python.sh`, because
 `src/main.py` creates `SimulationApp(...)` itself.
 
-Do not use:
-
-```bash
-isaac-sim.sh -p main.py
-# alias (optional)
-isaac_sim -p main.py
-```
-
-Use:
+Do not use `isaac-sim.sh -p main.py`. Use `python.sh` directly.
 
 ```bash
 /path/to/isaac-sim/python.sh ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py
-# alias (optional)
+# or, if you set the alias above
 isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py
 ```
 
-Headless example:
+### Arguments
+
+| Arg | Brief | Default | Cmd (`python.sh` and alias) |
+| --- | --- | --- | --- |
+| `--robot-variant` | Select the default robot asset variant. `29dof` is the current validated path. | `29dof` | `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --robot-variant 29dof` |
+| `--asset-path` | Override the default USD path with a specific asset file. | Uses the default asset path for the selected `--robot-variant`. | `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --asset-path ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/Models/USD/29dof/usd/g1_29dof_rev_1_0/g1_29dof_rev_1_0.usd` |
+| `--robot-prim-path` | Prim path where the robot is referenced into the stage. | `/World/G1` | `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --robot-prim-path /World/G1` |
+| `--robot-height` | Initial root height in meters for the referenced robot prim. | `0.8` | `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --robot-height 0.8` |
+| `--physics-dt` | Isaac Sim physics timestep in seconds. Must be a positive finite value. | `1.0 / 120.0` | `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --physics-dt 0.0083333333` |
+| `--headless` | Run without the Isaac Sim GUI window. | `False` | `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --headless` |
+| `--renderer` | Renderer passed into `SimulationApp`. | `RayTracedLighting` | `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --renderer RayTracedLighting` |
+| `--width` | Isaac Sim window width. | `1280` | `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --width 1280` |
+| `--height` | Isaac Sim window height. | `720` |  `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --height 720` |
+| `--max-frames` | Stop after a bounded number of simulation frames. `0` means run until closed. | `0` | `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --max-frames 300` |
+| `--print-all-joints` | Print the full articulation joint order during startup validation. | `False` |  `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --print-all-joints` |
+| `--enable-dds` | Enable the simulator DDS bridge so external Unitree clients can read simulator state as if it were a real robot. | `False` |  `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --enable-dds` |
+| `--dds-domain-id` | DDS domain id passed into the Unitree SDK channel factory. | `1` |  `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --enable-dds --dds-domain-id 1` |
+| `--lowstate-topic` | DDS topic used for low-level state publication. | `rt/lowstate` |  `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --enable-dds --lowstate-topic rt/lowstate` |
+| `--lowcmd-topic` | DDS topic used for low-level command subscription. | `rt/lowcmd` |  `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --enable-dds --lowcmd-topic rt/lowcmd` |
+| `--lowstate-publish-hz` | Target DDS publish rate for `rt/lowstate`. Must be a positive finite value. | `100.0` |  `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --enable-dds --lowstate-publish-hz 100` |
+| `--enable-lowcmd-subscriber` | Create the `rt/lowcmd` subscriber and apply cached body commands into the articulation. | `False` |  `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --enable-dds --enable-lowcmd-subscriber` |
+| `--lowcmd-timeout-seconds` | How long a cached `rt/lowcmd` sample stays fresh before the runtime stops reapplying it. `0` disables timeout handling. | `0.5` | `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --enable-dds --enable-lowcmd-subscriber --lowcmd-timeout-seconds 0.5` |
+| `--lowstate-cadence-report-interval` | Number of `rt/lowstate` publishes to accumulate before logging the observed simulation-time publish cadence. `0` disables cadence logs. | `500` | `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --enable-dds --lowstate-cadence-report-interval 500` |
+| `--lowstate-cadence-warn-ratio` | Relative error threshold for cadence diagnostics. Larger drift than this ratio is logged as a warning. | `0.05` | `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --enable-dds --lowstate-cadence-warn-ratio 0.05` |
+
+Important DDS notes:
+
+- The intent of this project is to make Isaac Sim look like a real G1 at the DDS boundary.
+- The simulator should publish the same low-level topics a real robot publishes so higher-level clients such as `unitree_sdk2` or `unitree_ros2` can run on top without simulator-specific adaptations.
+- The current baseline DDS path is:
+  - publish `rt/lowstate`
+  - subscribe to `rt/lowcmd`
+  - apply cached body commands back into the articulation
+- The current control slice should still be treated primarily as a conservative position-command path, but it now also forwards velocity, effort, and dynamic `kp` / `kd` gains when the articulation runtime exposes the corresponding setters.
+- Cached `rt/lowcmd` samples are now treated as fresh only for `--lowcmd-timeout-seconds`.
+  - When a command goes stale, the runtime stops reapplying it until a fresh DDS sample arrives again.
+- `--lowstate-publish-hz` must be a positive finite value.
+- `rt/lowstate` cadence now has built-in simulation-time diagnostics.
+  - The runtime reports the observed publish rate every `--lowstate-cadence-report-interval` publishes.
+  - If the observed rate drifts from `--lowstate-publish-hz` by more than `--lowstate-cadence-warn-ratio`, the runtime emits a warning.
+  - The scheduler now advances from the prior target time instead of re-anchoring to the current frame, which keeps the effective publish cadence aligned with the configured DDS rate more closely when physics dt and publish period are not exact multiples.
+- The current DDS manager runs inside the same Isaac Sim process and main simulation loop.
+- This is intentionally simpler than the Isaac Lab reference, which uses a heavier shared-memory and threaded structure between simulation state production and DDS I/O.
+- The direct single-process path keeps the current simulator easier to read and debug while DDS compatibility is still being established.
+- A threaded/shared-memory DDS decoupling layer can be added later if tighter runtime isolation or more flexible producer/consumer separation becomes necessary.
+
+## Baseline DDS Smoke Test
+
+This is the current baseline external DDS validation flow for the repo.
+
+Open one terminal and launch Isaac Sim with DDS enabled:
 
 ```bash
-./python.sh ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --headless --max-frames 300
-isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --headless --max-frames 300
+cd ~/path/to/unitree_g1_isaac_sim
+isaac_sim_python src/main.py --enable-dds --enable-lowcmd-subscriber
 ```
 
-Load the 23-DoF asset:
-**Yet to Test**
-```bash
-./python.sh ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --robot-variant 23dof
-isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --robot-variant 23dof
-```
-
-Override the USD directly:
+Open a second terminal, activate an environment that has `unitree_sdk2py`,
+and confirm `rt/lowstate` is visible externally:
 
 ```bash
-./python.sh ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --asset-path ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/Models/USD/29dof/usd/g1_29dof_rev_1_0/g1_29dof_rev_1_0.usd
+cd ~/path/to/unitree_g1_isaac_sim
+python3 scripts/lowstate_listener.py --dds-domain-id 1 --duration 5
 ```
 
+To inspect one specific DDS-order body joint directly:
 
-## Supported Args
+```bash
+cd ~/path/to/unitree_g1_isaac_sim
+python3 scripts/lowstate_listener.py \
+  --dds-domain-id 1 \
+  --duration 5 \
+  --joint-name left_shoulder_pitch_joint
+```
 
-- `--robot-variant`
-- `--asset-path`
-- `--robot-prim-path`
-- `--robot-height`
-- `--physics-dt`
-- `--headless`
-- `--renderer`
-- `--width`
-- `--height`
-- `--max-frames`
+To export that target joint as a CSV time series:
+
+```bash
+cd ~/path/to/unitree_g1_isaac_sim
+python3 scripts/lowstate_listener.py \
+  --dds-domain-id 1 \
+  --duration 10 \
+  --joint-name left_shoulder_pitch_joint \
+  --csv-path /tmp/left_shoulder_pitch_joint_lowstate.csv
+```
+
+CSV notes:
+
+- `--csv-path` requires `--joint-name`
+- the CSV contains one row per received `rt/lowstate` sample for the selected joint
+- columns are:
+  - `time_s`
+  - `tick`
+  - `joint_name`
+  - `q`
+  - `dq`
+  - `tau`
+
+Expected result:
+
+- `tick` increases
+- `crc_rejected=0`
+- joint positions, velocities, torques, and IMU values are populated
+
+Then send one conservative body-joint command:
+
+```bash
+cd ~/path/to/unitree_g1_isaac_sim
+python3 scripts/send_lowcmd_offset.py \
+  --dds-domain-id 1 \
+  --joint-name left_shoulder_pitch_joint \
+  --offset-rad 0.10 \
+  --duration 2.0
+```
+
+Safer first-motion alternative:
+
+```bash
+python3 scripts/send_lowcmd_offset.py \
+  --dds-domain-id 1 \
+  --joint-name waist_yaw_joint \
+  --offset-rad 0.05 \
+  --duration 1.5
+```
+
+Expected result:
+
+- Isaac Sim reports that `rt/lowcmd` was received
+- the targeted joint moves conservatively in the simulator
+- the motion is reflected back on the next `rt/lowstate` samples
+
+Notes:
+
+- Start with small offsets only.
+- Keep the DDS domain id matched across the simulator and test scripts.
+- `scripts/lowstate_listener.py` validates `--duration` as a non-negative finite value.
+- `scripts/send_lowcmd_offset.py` validates:
+  - `--rate-hz` as a positive finite value
+  - `--duration` as a non-negative finite value
+  - `--seed-timeout` as a non-negative finite value
+- If `isaac_sim_python` says `unitree_sdk2py` is unavailable, install it into Isaac Sim's Python, not only into your separate local test environment.
+- Wider incoming `LowCmd_` shapes are clamped to the supported 29 body joints instead of crashing on extra slots.
+- If `rt/lowcmd` traffic stops for longer than `--lowcmd-timeout-seconds`, the simulator stops reapplying the cached command until a fresh sample arrives.
+- The current `scripts/lowstate_listener.py` also supports `--joint-name` so you can inspect a specific DDS-order body joint directly during external validation.
+- The richer listener tooling also supports `--csv-path` so you can compare target-joint trajectories over time instead of relying only on one final sample.
+
+## Why Time-Series Lowstate Tooling Matters
+
+The basic DDS smoke test already proves the core body interface works:
+
+- `rt/lowstate` is externally visible
+- `rt/lowcmd` reaches the simulator
+- dynamic `kp` / `kd` gains are applied on the simulator side
+
+However, a single final lowstate snapshot is only enough to show that something changed.
+It does not tell you:
+
+- how fast the target joint moved
+- whether it overshot
+- whether it oscillated
+- whether damping is too weak
+- whether two different gain settings produced materially different trajectories
+
+That is why the richer `lowstate_listener.py` tooling exists.
+It turns DDS validation from:
+
+- "something moved"
+
+into:
+
+- "for this target joint, here is `q(t)`, `dq(t)`, and `tau(t)` over the command window"
+
+This is useful for:
+
+- validating dynamic gain application more rigorously
+- comparing controller behavior across gain settings
+- debugging future locomotion-controller integration over the same external DDS contract
+
+## TODO
+
+- [x] Standalone Isaac Sim launcher in `src/main.py`
+- [x] Stage/world setup for `/World`, physics scene, ground plane, light, and robot reference
+- [x] Articulation discovery for the G1 robot under `/World/G1`
+- [x] Live joint-state reads for positions, velocities, and efforts
+- [x] Frozen 29-DoF simulator joint order
+- [x] Frozen 29-DoF DDS body joint order
+- [x] Validated simulator-order to DDS-order joint mapping
+- [x] Startup validation that the live articulation still matches the frozen simulator order
+- [x] DDS-ordered joint snapshot preview from the live simulator snapshot
+- [x] Expanded robot-state reader for base position, base quaternion in validated Isaac Sim `wxyz` convention, base linear/angular velocity, and IMU-like body-frame signals
+- [x] Simulation-time based IMU acceleration estimation
+- [x] Add the DDS bridge package under `src/dds/`
+- [x] Implement `rt/lowstate` publication using Unitree SDK2 `LowState_`
+- [x] Implement `rt/lowcmd` subscription using Unitree SDK2 `LowCmd_`
+- [x] Apply incoming low-level body commands back into simulator joint order
+- [x] Add CRC handling on live DDS publish/subscribe paths
+- [ ] Verify publish cadence and stale-command behavior against the real G1 DDS contract
+- [ ] Add an optional threaded/shared-memory DDS decoupling layer if runtime isolation is needed
+- [ ] Add optional hand/gripper DDS bridges if needed for dex1, dex3, and inspire
+- [ ] Add reset/simulator-state utility DDS topics if needed
+- [x] Test the external client path with a standalone Unitree SDK-based DDS client
+- [ ] Properly support the `23dof` variant instead of leaving it as unverified
+- [ ] Decide on and implement the final deterministic startup/reset pose strategy
