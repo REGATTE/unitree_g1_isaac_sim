@@ -32,6 +32,14 @@ class LowStateSample:
     imu_gyroscope: list[float]
 
 
+@dataclass(frozen=True)
+class LowStateCapture:
+    latest: LowStateSample | None
+    history: list[LowStateSample]
+    messages_seen: int
+    messages_rejected: int
+
+
 class LowStateListener:
     def __init__(self, topic_name: str, max_history_samples: int = 5000) -> None:
         from unitree_sdk2py.utils.crc import CRC
@@ -54,6 +62,15 @@ class LowStateListener:
     def history(self) -> list[LowStateSample]:
         with self._lock:
             return list(self._history)
+
+    def capture(self) -> LowStateCapture:
+        with self._lock:
+            return LowStateCapture(
+                latest=self._latest,
+                history=list(self._history),
+                messages_seen=self._messages_seen,
+                messages_rejected=self._messages_rejected,
+            )
 
     def on_message(self, msg) -> None:
         if self._crc.Crc(msg) != msg.crc:
@@ -79,50 +96,71 @@ class LowStateListener:
                 del self._history[:overflow]
         self._messages_seen += 1
 
-    def print_summary(self, preview_joints: int, target_joint_name: str | None = None) -> None:
-        sample = self.latest
-        if sample is None:
-            print("No valid lowstate sample received yet.")
-            return
+    def print_summary(
+        self,
+        preview_joints: int,
+        target_joint_name: str | None = None,
+        *,
+        capture: LowStateCapture | None = None,
+    ) -> None:
+        if capture is None:
+            capture = self.capture()
+        print_lowstate_capture_summary(
+            capture,
+            preview_joints=preview_joints,
+            target_joint_name=target_joint_name,
+        )
 
-        print(f"tick={sample.tick} valid_messages={self._messages_seen} crc_rejected={self._messages_rejected}")
-        target_joint_index = None
-        if target_joint_name is not None:
-            target_joint_index = resolve_joint_index(target_joint_name)
+
+def print_lowstate_capture_summary(
+    capture: LowStateCapture,
+    *,
+    preview_joints: int,
+    target_joint_name: str | None = None,
+) -> None:
+    sample = capture.latest
+    if sample is None:
+        print("No valid lowstate sample received yet.")
+        return
+
+    print(f"tick={sample.tick} valid_messages={capture.messages_seen} crc_rejected={capture.messages_rejected}")
+    target_joint_index = None
+    if target_joint_name is not None:
+        target_joint_index = resolve_joint_index(target_joint_name)
+        print(
+            f"target {target_joint_name}: "
+            f"q={sample.positions[target_joint_index]: .5f} "
+            f"dq={sample.velocities[target_joint_index]: .5f} "
+            f"tau={sample.torques[target_joint_index]: .5f}"
+        )
+    for index, joint_name in enumerate(DDS_G1_29DOF_JOINT_NAMES[:preview_joints]):
+        if target_joint_index is not None and index == target_joint_index:
+            continue
+        print(
+            f"{index:02d} {joint_name}: "
+            f"q={sample.positions[index]: .5f} "
+            f"dq={sample.velocities[index]: .5f} "
+            f"tau={sample.torques[index]: .5f}"
+        )
+    print(f"imu_quaternion_xyzw={_format_vector(sample.imu_quaternion_xyzw)}")
+    print(f"imu_accelerometer={_format_vector(sample.imu_accelerometer)}")
+    print(f"imu_gyroscope={_format_vector(sample.imu_gyroscope)}")
+    if target_joint_name is not None:
+        target_stats = summarize_joint_history(
+            capture.history,
+            target_joint_name,
+            joint_index=target_joint_index,
+        )
+        if target_stats is not None:
             print(
-                f"target {target_joint_name}: "
-                f"q={sample.positions[target_joint_index]: .5f} "
-                f"dq={sample.velocities[target_joint_index]: .5f} "
-                f"tau={sample.torques[target_joint_index]: .5f}"
+                f"target_history {target_joint_name}: "
+                f"samples={target_stats.sample_count} "
+                f"duration_s={target_stats.duration_seconds:.3f} "
+                f"q_min={target_stats.position_min:.5f} "
+                f"q_max={target_stats.position_max:.5f} "
+                f"dq_peak={target_stats.velocity_peak_abs:.5f} "
+                f"tau_peak={target_stats.torque_peak_abs:.5f}"
             )
-        for index, joint_name in enumerate(DDS_G1_29DOF_JOINT_NAMES[:preview_joints]):
-            if target_joint_index is not None and index == target_joint_index:
-                continue
-            print(
-                f"{index:02d} {joint_name}: "
-                f"q={sample.positions[index]: .5f} "
-                f"dq={sample.velocities[index]: .5f} "
-                f"tau={sample.torques[index]: .5f}"
-            )
-        print(f"imu_quaternion_xyzw={_format_vector(sample.imu_quaternion_xyzw)}")
-        print(f"imu_accelerometer={_format_vector(sample.imu_accelerometer)}")
-        print(f"imu_gyroscope={_format_vector(sample.imu_gyroscope)}")
-        if target_joint_name is not None:
-            target_stats = summarize_joint_history(
-                self.history,
-                target_joint_name,
-                joint_index=target_joint_index,
-            )
-            if target_stats is not None:
-                print(
-                    f"target_history {target_joint_name}: "
-                    f"samples={target_stats.sample_count} "
-                    f"duration_s={target_stats.duration_seconds:.3f} "
-                    f"q_min={target_stats.position_min:.5f} "
-                    f"q_max={target_stats.position_max:.5f} "
-                    f"dq_peak={target_stats.velocity_peak_abs:.5f} "
-                    f"tau_peak={target_stats.torque_peak_abs:.5f}"
-                )
 
 
 @dataclass(frozen=True)
@@ -263,7 +301,8 @@ def main() -> int:
     while time.time() < deadline:
         time.sleep(0.05)
 
-    history = listener.history
+    capture = listener.capture()
+    history = capture.history
     if args.csv_path is not None:
         if args.joint_name is None:
             print("--csv-path requires --joint-name so the listener knows which DDS joint to export.", file=sys.stderr)
@@ -283,6 +322,7 @@ def main() -> int:
     listener.print_summary(
         preview_joints=max(args.preview_joints, 0),
         target_joint_name=args.joint_name,
+        capture=capture,
     )
     return 0
 

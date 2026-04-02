@@ -1,7 +1,9 @@
 import csv
+import io
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 
@@ -9,7 +11,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.lowstate_listener import LowStateSample, summarize_joint_history, write_joint_history_csv
+from scripts.lowstate_listener import (
+    LowStateCapture,
+    LowStateSample,
+    print_lowstate_capture_summary,
+    summarize_joint_history,
+    write_joint_history_csv,
+)
 
 
 def _make_sample(received_at_monotonic: float, tick: int, joint_index: int, q: float, dq: float, tau: float) -> LowStateSample:
@@ -118,6 +126,30 @@ class LowStateListenerHelperTests(unittest.TestCase):
         self.assertEqual(len(rows), 3)
         self.assertEqual(rows[1][1], "200")
         self.assertEqual(rows[2][1], "202")
+
+    def test_print_lowstate_capture_summary_uses_provided_capture_window(self):
+        capture = LowStateCapture(
+            latest=_make_sample(30.1, 301, 15, 0.25, -0.40, 2.5),
+            history=[
+                _make_sample(30.0, 300, 15, 0.10, 0.20, -1.0),
+                _make_sample(30.1, 301, 15, 0.25, -0.40, 2.5),
+            ],
+            messages_seen=2,
+            messages_rejected=1,
+        )
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            print_lowstate_capture_summary(
+                capture,
+                preview_joints=0,
+                target_joint_name="left_shoulder_pitch_joint",
+            )
+
+        rendered = output.getvalue()
+        self.assertIn("tick=301 valid_messages=2 crc_rejected=1", rendered)
+        self.assertIn("target_history left_shoulder_pitch_joint: samples=2 duration_s=0.100", rendered)
+        self.assertIn("q_max=0.25000", rendered)
 
 
 if __name__ == "__main__":
