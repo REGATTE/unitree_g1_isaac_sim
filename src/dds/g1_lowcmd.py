@@ -1,9 +1,9 @@
 """`rt/lowcmd` subscription boundary for the Unitree G1 simulator.
 
-This module is intentionally conservative in the first DDS slice. It provides
-the subscriber object and raw message validation/caching, but it does not yet
-apply commands back into Isaac Sim. That mapping step should only be added
-after `rt/lowstate` publication is verified against an external client.
+This module owns the raw DDS ingest side of the body low-level command path.
+It validates incoming Unitree messages, clamps the message width to the
+supported 29 body joints, and exposes a cached simulator-agnostic command
+snapshot that the runtime loop can translate into Isaac Sim control writes.
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import logging
 from threading import Lock
+import time
 from typing import Any
 
 from mapping.joints import BODY_JOINT_COUNT
@@ -21,7 +22,7 @@ LOGGER = logging.getLogger("unitree_g1_isaac_sim.dds.lowcmd")
 
 @dataclass(frozen=True)
 class LowCmdCache:
-    """Raw command cache for the next simulator-control integration step."""
+    """Validated raw body command cache from the DDS boundary."""
 
     mode_pr: int
     mode_machine: int
@@ -30,13 +31,13 @@ class LowCmdCache:
     joint_torques_dds: tuple[float, ...]
     joint_kp_dds: tuple[float, ...]
     joint_kd_dds: tuple[float, ...]
+    received_at_monotonic: float
 
     def to_sim_order(self) -> dict[str, list[float]]:
         """Return body-joint command vectors in simulator joint order.
 
-        The command application path is still a follow-up step, but exposing
-        this conversion here makes the next control-layer patch explicit and
-        keeps the DDS-to-simulator joint-order translation centralized.
+        Keeping the DDS-to-simulator remap here ensures the rest of the runtime
+        only handles simulator-order control vectors.
         """
         return {
             "positions": reorder_dds_values_to_sim(self.joint_positions_dds),
@@ -114,6 +115,7 @@ class G1LowCmdSubscriber:
             joint_torques_dds=tuple(float(motor_cmd[index].tau) for index in range(count)),
             joint_kp_dds=tuple(float(motor_cmd[index].kp) for index in range(count)),
             joint_kd_dds=tuple(float(motor_cmd[index].kd) for index in range(count)),
+            received_at_monotonic=time.monotonic(),
         )
 
     def _warn_extra_message_fields(self, incoming_count: int) -> None:

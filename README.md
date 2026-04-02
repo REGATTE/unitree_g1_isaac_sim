@@ -81,6 +81,9 @@ isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py
 | `--lowcmd-topic` | DDS topic used for low-level command subscription. | `rt/lowcmd` |  `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --enable-dds --lowcmd-topic rt/lowcmd` |
 | `--lowstate-publish-hz` | Target DDS publish rate for `rt/lowstate`. | `100.0` |  `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --enable-dds --lowstate-publish-hz 100` |
 | `--enable-lowcmd-subscriber` | Create the `rt/lowcmd` subscriber and apply cached body commands into the articulation. | `False` |  `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --enable-dds --enable-lowcmd-subscriber` |
+| `--lowcmd-timeout-seconds` | How long a cached `rt/lowcmd` sample stays fresh before the runtime stops reapplying it. `0` disables timeout handling. | `0.5` | `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --enable-dds --enable-lowcmd-subscriber --lowcmd-timeout-seconds 0.5` |
+| `--lowstate-cadence-report-interval` | Number of `rt/lowstate` publishes to accumulate before logging the observed simulation-time publish cadence. `0` disables cadence logs. | `500` | `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --enable-dds --lowstate-cadence-report-interval 500` |
+| `--lowstate-cadence-warn-ratio` | Relative error threshold for cadence diagnostics. Larger drift than this ratio is logged as a warning. | `0.05` | `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --enable-dds --lowstate-cadence-warn-ratio 0.05` |
 
 Important DDS note:
 
@@ -90,8 +93,12 @@ Important DDS note:
   - publish `rt/lowstate`
   - subscribe to `rt/lowcmd`
   - apply cached body commands back into the articulation
-- The current control slice should still be treated primarily as a conservative position-command path.
-- Dynamic `kp` / `kd` application is not implemented yet.
+- The current control slice should still be treated primarily as a conservative position-command path, but it now also forwards velocity, effort, and dynamic `kp` / `kd` gains when the articulation runtime exposes the corresponding setters.
+- Cached `rt/lowcmd` samples are now treated as fresh only for `--lowcmd-timeout-seconds`.
+  - When a command goes stale, the runtime stops reapplying it until a fresh DDS sample arrives again.
+- `rt/lowstate` cadence now has built-in simulation-time diagnostics.
+  - The runtime reports the observed publish rate every `--lowstate-cadence-report-interval` publishes.
+  - If the observed rate drifts from `--lowstate-publish-hz` by more than `--lowstate-cadence-warn-ratio`, the runtime emits a warning.
 - The current DDS manager runs inside the same Isaac Sim process and main simulation loop.
 - This is intentionally simpler than the Isaac Lab reference, which uses a heavier shared-memory and threaded structure between simulation state production and DDS I/O.
 - The direct single-process path keeps the current simulator easier to read and debug while DDS compatibility is still being established.
@@ -155,7 +162,8 @@ Notes:
 - Keep the DDS domain id matched across the simulator and test scripts.
 - If `isaac_sim_python` says `unitree_sdk2py` is unavailable, install it into Isaac Sim's Python, not only into your separate local test environment.
 - The current `dds_dev` branch now clamps wider incoming `LowCmd_` shapes to the supported 29 body joints instead of crashing on extra slots.
-- The next validation is to re-run this smoke test end to end and confirm the conservative commanded motion is reflected back on `rt/lowstate`.
+- If `rt/lowcmd` traffic stops for longer than `--lowcmd-timeout-seconds`, the simulator stops reapplying the cached command until a fresh sample arrives.
+- The current `scripts/lowstate_listener.py` also supports `--joint-name` so you can inspect a specific DDS-order body joint directly during external validation.
 
 ## TODO
 
@@ -175,7 +183,7 @@ Notes:
 - [x] Implement `rt/lowcmd` subscription using Unitree SDK2 `LowCmd_`
 - [x] Apply incoming low-level body commands back into simulator joint order
 - [x] Add CRC handling on live DDS publish/subscribe paths
-- [ ] Verify publish cadence and runtime behavior against the real G1 DDS contract
+- [ ] Verify publish cadence and stale-command behavior against the real G1 DDS contract
 - [ ] Add an optional threaded/shared-memory DDS decoupling layer if runtime isolation is needed
 - [ ] Add optional hand/gripper DDS bridges if needed for dex1, dex3, and inspire
 - [ ] Add reset/simulator-state utility DDS topics if needed

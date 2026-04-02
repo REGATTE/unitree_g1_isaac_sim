@@ -35,6 +35,9 @@ class AppConfig:
     lowcmd_topic: str
     lowstate_publish_hz: float
     enable_lowcmd_subscriber: bool
+    lowcmd_timeout_seconds: float
+    lowstate_cadence_report_interval: int
+    lowstate_cadence_warn_ratio: float
 
     def resolve_asset_path(self) -> Path:
         asset_path = self.asset_path or DEFAULT_ASSET_BY_VARIANT[self.robot_variant]
@@ -155,8 +158,36 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--enable-lowcmd-subscriber",
         action="store_true",
         help=(
-            "Create the `rt/lowcmd` subscriber skeleton. The command-to-simulator "
-            "mapping remains a follow-up step."
+            "Create the `rt/lowcmd` subscriber and apply accepted body commands "
+            "into the live articulation."
+        ),
+    )
+    parser.add_argument(
+        "--lowcmd-timeout-seconds",
+        type=float,
+        default=0.5,
+        help=(
+            "How long a cached `rt/lowcmd` sample stays fresh before the runtime "
+            "treats it as stale and stops reapplying it. Use 0 to disable."
+        ),
+    )
+    parser.add_argument(
+        "--lowstate-cadence-report-interval",
+        type=int,
+        default=500,
+        help=(
+            "How many `rt/lowstate` publishes to accumulate before reporting the "
+            "observed simulation-time publish cadence. Use 0 to disable."
+        ),
+    )
+    parser.add_argument(
+        "--lowstate-cadence-warn-ratio",
+        type=float,
+        default=0.05,
+        help=(
+            "Relative tolerance for cadence diagnostics. If the observed "
+            "`rt/lowstate` rate differs from the configured rate by more than "
+            "this ratio, the runtime emits a warning instead of an info log."
         ),
     )
     return parser
@@ -182,4 +213,7 @@ def parse_config(argv: list[str] | None = None) -> AppConfig:
         lowcmd_topic=args.lowcmd_topic,
         lowstate_publish_hz=args.lowstate_publish_hz,
         enable_lowcmd_subscriber=args.enable_lowcmd_subscriber,
+        lowcmd_timeout_seconds=args.lowcmd_timeout_seconds,
+        lowstate_cadence_report_interval=args.lowstate_cadence_report_interval,
+        lowstate_cadence_warn_ratio=args.lowstate_cadence_warn_ratio,
     )

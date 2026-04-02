@@ -5,12 +5,9 @@ responsible for validating and caching raw Unitree messages; this module takes
 the latest cached command, remaps it back into simulator joint order, and
 applies the supported fields to the articulation.
 
-The first command slice intentionally mirrors the minimum viable behavior used
-in the Isaac Lab reference: body joint position targets are the primary control
-surface. Velocity and effort targets are also forwarded when the articulation
-wrapper exposes matching setters. Joint gains (`kp`, `kd`) are cached by the
-DDS subscriber but are not yet applied dynamically here because the required
-runtime APIs are not standardized across the Isaac Sim versions we support.
+The current control slice stays intentionally conservative: body joint position
+targets remain the primary surface, while velocity, effort, and PD gains are
+forwarded when the articulation wrapper exposes the corresponding setters.
 """
 
 from __future__ import annotations

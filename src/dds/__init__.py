@@ -6,10 +6,12 @@ This package is intentionally small and focused on the external robot contract:
 - receive low-level commands from the same DDS topics used by the real robot
 - keep joint-order and frame-convention translation explicit at the DDS boundary
 
-The first implemented slice is `rt/lowstate` publication. The `rt/lowcmd`
-subscriber is present as a documented skeleton so the command-ingest boundary
-is visible in the codebase, but simulator command application remains a
-follow-up step.
+The current baseline body DDS surface is:
+
+- `rt/lowstate` publication
+- `rt/lowcmd` subscription
+- simulator-order application of body positions / velocities / efforts / gains
+- explicit stale-command handling at the DDS manager boundary
 """
 
 from .manager import DdsManager

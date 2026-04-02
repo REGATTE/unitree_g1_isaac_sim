@@ -1,4 +1,5 @@
 import sys
+import time
 import unittest
 from pathlib import Path
 
@@ -50,6 +51,7 @@ class RobotCommandApplierTests(unittest.TestCase):
             joint_torques_dds=tuple(float(index + 200) for index in range(29)),
             joint_kp_dds=tuple(float(index + 300) for index in range(29)),
             joint_kd_dds=tuple(float(index + 400) for index in range(29)),
+            received_at_monotonic=time.monotonic(),
         )
 
         result = applier.apply_lowcmd(lowcmd)

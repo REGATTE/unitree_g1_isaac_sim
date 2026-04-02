@@ -596,3 +596,65 @@
   - publish-rate and real-contract validation
   - optional hand DDS topics
   - richer lowstate time-series tooling if controller-tuning analysis is needed later
+
+## ===================================================================================================================================
+
+## 2026-04-02 DDS Freshness and Cadence Follow-Up
+
+- Continued the next DDS contract-validation slice on `dds_dev`.
+  - Focus for this round:
+    - lowstate publish cadence observability
+    - explicit stale-command handling on `rt/lowcmd`
+    - cleanup of stale DDS/lowcmd comments and docs
+
+- Added explicit lowcmd freshness handling in `src/dds/manager.py`.
+  - `rt/lowcmd` cache entries now carry a `received_at_monotonic` timestamp from the DDS boundary.
+  - Added runtime config:
+    - `--lowcmd-timeout-seconds`
+  - Behavior now:
+    - fresh commands are applied normally
+    - if the cached lowcmd sample ages past the configured timeout, the runtime stops reapplying it
+    - when a fresh command arrives again, the runtime logs that command application is resuming
+  - Current stale-command semantics are intentionally simple:
+    - stop reapplying stale DDS commands
+    - leave the last articulation targets already latched in Isaac Sim untouched
+  - This makes stale-command behavior explicit without introducing a new fallback controller in the same patch.
+
+- Added lowstate cadence diagnostics in `src/dds/manager.py`.
+  - Added runtime config:
+    - `--lowstate-cadence-report-interval`
+    - `--lowstate-cadence-warn-ratio`
+  - The manager now logs observed simulation-time `rt/lowstate` publish cadence over a rolling publish window.
+  - If the observed publish rate differs too much from `--lowstate-publish-hz`, the runtime emits a warning.
+  - This does not by itself prove the cadence matches the real G1 contract, but it now gives the repo a first-class measurement path for that validation.
+
+- Cleaned up stale DDS docs/comments to match the merged runtime state.
+  - `src/dds/__init__.py` now reflects that the current baseline body DDS surface includes active lowcmd application and stale-command handling.
+  - `src/dds/g1_lowcmd.py` no longer describes the lowcmd path as a pre-application skeleton.
+  - `src/robot_control.py` no longer claims dynamic `kp` / `kd` is unimplemented.
+  - `README.md` now documents:
+    - the new timeout and cadence flags
+    - active dynamic gain support
+    - current stale-command semantics
+    - direct named-joint lowstate inspection support for DDS validation
+
+- Added focused regression coverage.
+  - Added `tests/test_dds_manager.py`:
+    - stale lowcmd samples are not returned as active commands
+    - fresh lowcmd samples remain available
+    - cadence reporting emits the observed publish rate
+  - Updated `tests/test_robot_control.py` for the expanded lowcmd cache metadata.
+
+- Verified during this round:
+  - `python3 -m unittest tests/test_g1_lowcmd.py tests/test_robot_control.py tests/test_dds_manager.py`
+  - `python3 -m py_compile src/config.py src/dds/g1_lowcmd.py src/dds/manager.py src/dds/__init__.py src/robot_control.py tests/test_robot_control.py tests/test_dds_manager.py`
+
+## Resume Here
+
+- Run a live cadence and stale-command smoke test on `dds_dev`:
+  - confirm the cadence diagnostics are close to the configured publish rate
+  - stop external lowcmd publication and verify the stale-command timeout behavior matches expectations
+- After that, decide whether the next follow-up should be:
+  - optional hand DDS topics
+  - richer lowstate time-series tooling
+  - deterministic startup/reset semantics
