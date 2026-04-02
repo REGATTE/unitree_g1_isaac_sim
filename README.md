@@ -206,6 +206,41 @@ Notes:
 - The current `scripts/lowstate_listener.py` also supports `--joint-name` so you can inspect a specific DDS-order body joint directly during external validation.
 - The richer listener tooling also supports `--csv-path` so you can compare target-joint trajectories over time instead of relying only on one final sample.
 
+## Automated DDS Smoke Test
+
+If `isaac_sim_python` is already available in your shell, you can run the
+baseline DDS smoke test end-to-end with one command:
+
+```bash
+cd ~/path/to/unitree_g1_isaac_sim
+./scripts/run_dds_smoke_test.sh
+```
+
+What it does:
+
+- starts Isaac Sim headless with DDS enabled
+- waits for the DDS lowstate publisher and lowcmd subscriber to report ready
+- runs `scripts/lowstate_listener.py`
+- runs `scripts/send_lowcmd_offset.py`
+- stops Isaac Sim automatically
+- writes logs under `tmp/dds_smoke_logs/`
+
+If you want to override the Isaac Sim launcher path explicitly, you can run:
+
+```bash
+cd ~/path/to/unitree_g1_isaac_sim
+ISAACSIM_PYTHON_EXE=/absolute/path/to/isaac-sim/python.sh ./scripts/run_dds_smoke_test.sh
+```
+
+Useful environment overrides:
+
+- `DDS_DOMAIN_ID=1`
+- `SIM_STARTUP_TIMEOUT_SECONDS=90`
+- `LOWSTATE_DURATION_SECONDS=6`
+- `LOWCMD_DURATION_SECONDS=2`
+- `LOWCMD_JOINT_NAME=left_shoulder_pitch_joint`
+- `LOWCMD_OFFSET_RAD=0.10`
+
 ## Why Time-Series Lowstate Tooling Matters
 
 The basic DDS smoke test already proves the core body interface works:

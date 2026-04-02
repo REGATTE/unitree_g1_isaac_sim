@@ -19,6 +19,10 @@ from typing import Any
 
 from mapping import to_dds_ordered_snapshot
 from robot_state import JointStateSnapshot, RobotKinematicSnapshot
+from runtime_logging import get_logger
+
+
+LOGGER = get_logger("dds.lowstate")
 
 
 def unitree_sdk_is_available() -> bool:
@@ -98,7 +102,7 @@ class G1LowStatePublisher:
         self._crc_helper = CRC()
         self._low_state_message = unitree_hg_msg_dds__LowState_()
         self._sdk_enabled = True
-        print(f"[unitree_g1_isaac_sim] DDS lowstate publisher ready on {self._topic_name}")
+        LOGGER.info("DDS lowstate publisher ready on %s", self._topic_name)
         return True
 
     def publish(self, snapshot: RobotKinematicSnapshot) -> bool:
@@ -173,9 +177,8 @@ class G1LowStatePublisher:
     def _warn_sdk_unavailable(self) -> None:
         if self._warned_unavailable:
             return
-        print(
-            "[unitree_g1_isaac_sim] DDS requested but `unitree_sdk2py` is not installed. "
-            "Skipping `rt/lowstate` publication."
+        LOGGER.warning(
+            "DDS requested but `unitree_sdk2py` is not installed. Skipping `rt/lowstate` publication."
         )
         self._warned_unavailable = True
 

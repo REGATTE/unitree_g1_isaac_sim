@@ -8,7 +8,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from runtime_logging import get_logger
+
 from .joints import G1_29DOF_JOINT_MAPPING, JointOrderMapping
+
+LOGGER = get_logger("mapping.validator")
 
 
 @dataclass(frozen=True)
@@ -70,10 +74,10 @@ def validate_live_joint_order(
 
 
 def log_joint_validation_report(report: JointValidationReport) -> None:
-    """Print a short startup summary once the joint order is validated."""
-    print(
-        "[unitree_g1_isaac_sim] joint mapping validated: "
-        f"{report.joint_count} live joints, "
-        f"{report.dds_joint_count} DDS joints, "
-        f"sim_order_match={report.sim_joint_order_matches}"
+    """Log a short startup summary once the joint order is validated."""
+    LOGGER.info(
+        "joint mapping validated: %s live joints, %s DDS joints, sim_order_match=%s",
+        report.joint_count,
+        report.dds_joint_count,
+        report.sim_joint_order_matches,
     )

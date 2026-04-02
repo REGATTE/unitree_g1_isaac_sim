@@ -12,11 +12,13 @@ import math
 from typing import Sequence
 
 import numpy as np
+from runtime_logging import get_logger
 
 
 _GRAVITY_MAGNITUDE_MPS2 = 9.81
 _WORLD_GRAVITY_VECTOR = (0.0, 0.0, -_GRAVITY_MAGNITUDE_MPS2)
 _WORLD_PROPER_ACCELERATION_AT_REST = (0.0, 0.0, _GRAVITY_MAGNITUDE_MPS2)
+LOGGER = get_logger("robot_state")
 
 
 class PhysicsViewUnavailableError(RuntimeError):
@@ -358,17 +360,17 @@ class RobotStateReader:
 
     def _raise_physics_view_unavailable(self, reason: str) -> None:
         if not self._warned_physics_view_unavailable:
-            print(
-                "[unitree_g1_isaac_sim] articulation physics view unavailable; "
-                "skipping joint state/control updates until physics resumes. "
-                f"reason={reason}"
+            LOGGER.warning(
+                "articulation physics view unavailable; skipping joint state/control updates "
+                "until physics resumes. reason=%s",
+                reason,
             )
             self._warned_physics_view_unavailable = True
         raise PhysicsViewUnavailableError(reason)
 
     def _mark_physics_view_ready(self) -> None:
         if self._warned_physics_view_unavailable:
-            print("[unitree_g1_isaac_sim] articulation physics view restored; resuming DDS/state updates.")
+            LOGGER.info("articulation physics view restored; resuming DDS/state updates.")
         self._warned_physics_view_unavailable = False
 
     def _read_world_pose(self) -> tuple[list[float], list[float]]:
@@ -517,14 +519,11 @@ def _mat3_mul_vec3(matrix: list[list[float]], vector: Sequence[float]) -> list[f
 
 
 def log_kinematic_snapshot(snapshot: RobotKinematicSnapshot) -> None:
-    """Print a one-time startup summary for base pose conventions."""
+    """Log a one-time startup summary for base pose conventions."""
     position = ", ".join(f"{value:.6f}" for value in snapshot.base_position_world)
     quaternion = ", ".join(f"{value:.6f}" for value in snapshot.base_quaternion_wxyz)
-    print(f"[unitree_g1_isaac_sim] base_position_world=({position})")
-    print(
-        "[unitree_g1_isaac_sim] base_quaternion_wxyz="
-        f"({quaternion}) from Isaac Sim get_world_poses()"
-    )
+    LOGGER.info("base_position_world=(%s)", position)
+    LOGGER.info("base_quaternion_wxyz=(%s) from Isaac Sim get_world_poses()", quaternion)
 
 
 def log_joint_state(
@@ -532,28 +531,37 @@ def log_joint_state(
     limit: int | None = 12,
     order_label: str | None = None,
 ) -> None:
-    """Print a startup joint-state preview.
+    """Log a startup joint-state preview.
 
     Set ``limit`` to ``None`` to print the full articulation order.
     Use ``order_label`` to distinguish simulator-order and DDS-order logs.
     """
     label_prefix = f"{order_label}_" if order_label else ""
     total = len(snapshot.joint_names)
-    print(f"[unitree_g1_isaac_sim] detected {total} {label_prefix}joints")
+    LOGGER.info("detected %s %sjoints", total, label_prefix)
     visible_joint_count = total if limit is None else min(total, limit)
     for index, name in enumerate(snapshot.joint_names[:visible_joint_count]):
         position = snapshot.joint_positions[index] if index < len(snapshot.joint_positions) else float("nan")
         velocity = snapshot.joint_velocities[index] if index < len(snapshot.joint_velocities) else float("nan")
         if snapshot.joint_efforts is not None and index < len(snapshot.joint_efforts):
             effort = snapshot.joint_efforts[index]
-            print(
-                f"[unitree_g1_isaac_sim] {label_prefix}joint[{index:02d}] {name}: "
-                f"pos={position:.6f} vel={velocity:.6f} effort={effort:.6f}"
+            LOGGER.info(
+                "%sjoint[%02d] %s: pos=%.6f vel=%.6f effort=%.6f",
+                label_prefix,
+                index,
+                name,
+                position,
+                velocity,
+                effort,
             )
         else:
-            print(
-                f"[unitree_g1_isaac_sim] {label_prefix}joint[{index:02d}] {name}: "
-                f"pos={position:.6f} vel={velocity:.6f}"
+            LOGGER.info(
+                "%sjoint[%02d] %s: pos=%.6f vel=%.6f",
+                label_prefix,
+                index,
+                name,
+                position,
+                velocity,
             )
     if limit is not None and total > limit:
-        print(f"[unitree_g1_isaac_sim] ... truncated {total - limit} additional {label_prefix}joints")
+        LOGGER.info("... truncated %s additional %sjoints", total - limit, label_prefix)

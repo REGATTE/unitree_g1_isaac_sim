@@ -1,8 +1,6 @@
-import io
 import sys
 import time
 import unittest
-from contextlib import redirect_stdout
 from pathlib import Path
 
 
@@ -117,15 +115,15 @@ class DdsManagerTests(unittest.TestCase):
 
     def test_cadence_reporting_emits_observed_rate(self):
         manager = DdsManager(_build_config())
-        output = io.StringIO()
 
-        with redirect_stdout(output):
+        with self.assertLogs("unitree_g1_isaac_sim.dds.manager", level="INFO") as captured:
             manager._cadence.record(0.00, expected_hz=100.0, interval=3, warn_ratio=0.05)
             manager._cadence.record(0.01, expected_hz=100.0, interval=3, warn_ratio=0.05)
             manager._cadence.record(0.02, expected_hz=100.0, interval=3, warn_ratio=0.05)
 
-        self.assertIn("lowstate cadence check", output.getvalue())
-        self.assertIn("observed=100.000Hz", output.getvalue())
+        output = "\n".join(captured.output)
+        self.assertIn("lowstate cadence check", output)
+        self.assertIn("observed=100.000Hz", output)
 
     def test_lowstate_schedule_does_not_reanchor_to_current_frame(self):
         manager = DdsManager(_build_config())

@@ -20,9 +20,13 @@ from typing import Any
 
 from config import AppConfig
 from robot_state import RobotKinematicSnapshot
+from runtime_logging import get_logger
 
 from .g1_lowcmd import G1LowCmdSubscriber, LowCmdCache
 from .g1_lowstate import G1LowStatePublisher, unitree_sdk_is_available
+
+
+LOGGER = get_logger("dds.manager")
 
 
 @dataclass(frozen=True)
@@ -57,12 +61,15 @@ class CadenceTracker:
         publishes = self.publish_count
         observed_hz = 0.0 if elapsed <= 0.0 else (publishes - 1) / elapsed
         relative_error = 0.0 if expected_hz <= 0.0 else abs(observed_hz - expected_hz) / expected_hz
-        log_prefix = "WARNING" if relative_error > warn_ratio else "INFO"
-        print(
-            "[unitree_g1_isaac_sim] "
-            f"{log_prefix} lowstate cadence check: observed={observed_hz:.3f}Hz "
-            f"expected={expected_hz:.3f}Hz publishes={publishes} "
-            f"window_dt={elapsed:.3f}s rel_error={relative_error:.3%}"
+        log_method = LOGGER.warning if relative_error > warn_ratio else LOGGER.info
+        log_method(
+            "lowstate cadence check: observed=%.3fHz expected=%.3fHz publishes=%s "
+            "window_dt=%.3fs rel_error=%.3f%%",
+            observed_hz,
+            expected_hz,
+            publishes,
+            elapsed,
+            relative_error * 100.0,
         )
 
         self.window_start_time = t
@@ -100,11 +107,11 @@ class DdsManager:
         self._initialized = True
 
         if not self._config.enable_dds:
-            print("[unitree_g1_isaac_sim] DDS bridge disabled")
+            LOGGER.info("DDS bridge disabled")
             return False
         if not unitree_sdk_is_available():
-            print(
-                "[unitree_g1_isaac_sim] DDS bridge enabled but `unitree_sdk2py` is unavailable. "
+            LOGGER.warning(
+                "DDS bridge enabled but `unitree_sdk2py` is unavailable. "
                 "The simulator will continue without external DDS I/O."
             )
             return False
@@ -113,16 +120,16 @@ class DdsManager:
 
         ChannelFactoryInitialize(self._config.dds_domain_id)
         self._sdk_enabled = True
-        print(
-            "[unitree_g1_isaac_sim] initialized Unitree DDS channel factory "
-            f"(domain_id={self._config.dds_domain_id})"
+        LOGGER.info(
+            "initialized Unitree DDS channel factory (domain_id=%s)",
+            self._config.dds_domain_id,
         )
 
         self._lowstate_publisher.initialize()
         if self._config.enable_lowcmd_subscriber:
             self._lowcmd_subscriber.initialize()
         else:
-            print("[unitree_g1_isaac_sim] lowcmd subscriber disabled for this run")
+            LOGGER.info("lowcmd subscriber disabled for this run")
         return True
 
     def step(self, simulation_time_seconds: float, snapshot: RobotKinematicSnapshot) -> DdsStepResult:
@@ -173,9 +180,10 @@ class DdsManager:
                 return None
             if not self._warned_stale_lowcmd:
                 age_seconds = now_monotonic - cached.received_at_monotonic
-                print(
-                    "[unitree_g1_isaac_sim] cached `rt/lowcmd` sample went stale "
-                    f"after {age_seconds:.3f}s; stopping command reapplication until a fresh sample arrives."
+                LOGGER.warning(
+                    "cached `rt/lowcmd` sample went stale after %.3fs; stopping command "
+                    "reapplication until a fresh sample arrives.",
+                    age_seconds,
                 )
                 self._warned_stale_lowcmd = True
             return None
@@ -184,7 +192,7 @@ class DdsManager:
             self._warned_stale_lowcmd = False
             return None
         if self._warned_stale_lowcmd:
-            print("[unitree_g1_isaac_sim] received fresh `rt/lowcmd` again; resuming command application.")
+            LOGGER.info("received fresh `rt/lowcmd` again; resuming command application.")
         self._warned_stale_lowcmd = False
         return cached
 
