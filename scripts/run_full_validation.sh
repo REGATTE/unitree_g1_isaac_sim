@@ -66,6 +66,10 @@ assert_log_contains() {
   local file_path="$1"
   local pattern="$2"
   local label="$3"
+  if [[ ! -f "${file_path}" ]]; then
+    log "check failed: ${label} (missing ${file_path})"
+    return 1
+  fi
   if grep -F -q "${pattern}" "${file_path}"; then
     log "check passed: ${label}"
     return 0

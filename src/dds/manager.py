@@ -172,7 +172,8 @@ class DdsManager:
 
     def reset_runtime_state(self) -> None:
         """Clear transient DDS runtime state after an in-session simulator reset."""
-        self._lowcmd_subscriber.clear_cached_command()
+        if hasattr(self._lowcmd_subscriber, "clear_cached_command"):
+            self._lowcmd_subscriber.clear_cached_command()
         self._warned_stale_lowcmd = False
         self._next_lowstate_publish_time = 0.0
         self._cadence = CadenceTracker()

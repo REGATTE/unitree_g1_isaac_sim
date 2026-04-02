@@ -205,7 +205,9 @@ class RobotStateReader:
         applied = positions_applied or velocities_applied
         if applied:
             LOGGER.info(
-                "applied deterministic reset state: joint_positions=0 joint_velocities=0 joint_count=%s",
+                "applied deterministic reset state: joint_positions=%s joint_velocities=%s joint_count=%s",
+                0 if positions_applied else "unchanged",
+                0 if velocities_applied else "unchanged",
                 joint_count,
             )
         else:
