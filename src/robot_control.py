@@ -18,7 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from dds.g1_lowcmd import LowCmdCache
-from robot_state import RobotStateReader
+from robot_state import PhysicsViewUnavailableError, RobotStateReader
 
 
 @dataclass(frozen=True)
@@ -55,9 +55,17 @@ class RobotCommandApplier:
             )
 
         sim_order_command = lowcmd.to_sim_order()
-        position_applied = self._state_reader.apply_joint_position_targets(sim_order_command["positions"])
-        velocity_applied = self._state_reader.apply_joint_velocity_targets(sim_order_command["velocities"])
-        effort_applied = self._state_reader.apply_joint_efforts(sim_order_command["torques"])
+        try:
+            position_applied = self._state_reader.apply_joint_position_targets(sim_order_command["positions"])
+            velocity_applied = self._state_reader.apply_joint_velocity_targets(sim_order_command["velocities"])
+            effort_applied = self._state_reader.apply_joint_efforts(sim_order_command["torques"])
+        except PhysicsViewUnavailableError:
+            return LowCmdApplyResult(
+                command_seen=True,
+                position_applied=False,
+                velocity_applied=False,
+                effort_applied=False,
+            )
 
         self._warn_if_gains_are_not_applied(lowcmd)
         return LowCmdApplyResult(
