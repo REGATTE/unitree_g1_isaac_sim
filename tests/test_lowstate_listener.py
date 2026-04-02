@@ -89,11 +89,12 @@ class LowStateListenerHelperTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             output_path = Path(temp_dir) / "left_shoulder_pitch_joint.csv"
-            write_joint_history_csv(history, "left_shoulder_pitch_joint", output_path)
+            exported_sample_count = write_joint_history_csv(history, "left_shoulder_pitch_joint", output_path)
 
             with output_path.open(newline="") as csv_file:
                 rows = list(csv.reader(csv_file))
 
+        self.assertEqual(exported_sample_count, 2)
         self.assertEqual(rows[0], ["time_s", "tick", "joint_name", "q", "dq", "tau"])
         self.assertEqual(rows[1][1], "200")
         self.assertEqual(rows[1][2], "left_shoulder_pitch_joint")
@@ -118,11 +119,12 @@ class LowStateListenerHelperTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             output_path = Path(temp_dir) / "left_shoulder_pitch_joint.csv"
-            write_joint_history_csv(history, "left_shoulder_pitch_joint", output_path)
+            exported_sample_count = write_joint_history_csv(history, "left_shoulder_pitch_joint", output_path)
 
             with output_path.open(newline="") as csv_file:
                 rows = list(csv.reader(csv_file))
 
+        self.assertEqual(exported_sample_count, 2)
         self.assertEqual(len(rows), 3)
         self.assertEqual(rows[1][1], "200")
         self.assertEqual(rows[2][1], "202")

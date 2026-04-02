@@ -74,7 +74,8 @@ class LowStateListener:
 
     def on_message(self, msg) -> None:
         if self._crc.Crc(msg) != msg.crc:
-            self._messages_rejected += 1
+            with self._lock:
+                self._messages_rejected += 1
             return
 
         motor_state = msg.motor_state
@@ -94,7 +95,7 @@ class LowStateListener:
             overflow = len(self._history) - self._max_history_samples
             if overflow > 0:
                 del self._history[:overflow]
-        self._messages_seen += 1
+            self._messages_seen += 1
 
     def print_summary(
         self,
@@ -227,7 +228,7 @@ def write_joint_history_csv(
     output_path: Path,
     *,
     joint_index: int | None = None,
-) -> None:
+) -> int:
     if joint_index is None:
         joint_index = resolve_joint_index(joint_name)
     filtered_history = _filter_joint_history_samples(history, joint_index)
@@ -247,6 +248,7 @@ def write_joint_history_csv(
                     f"{sample.torques[joint_index]:.9f}",
                 ]
             )
+    return len(filtered_history)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -291,7 +293,11 @@ def main() -> int:
         print(f"Failed to import unitree_sdk2py: {exc}", file=sys.stderr)
         return 1
 
-    target_joint_index = resolve_joint_index(args.joint_name) if args.joint_name is not None else None
+    try:
+        target_joint_index = resolve_joint_index(args.joint_name) if args.joint_name is not None else None
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     listener = LowStateListener(topic_name=args.topic)
     ChannelFactoryInitialize(args.dds_domain_id)
     subscriber = ChannelSubscriber(args.topic, LowState_)
@@ -310,14 +316,13 @@ def main() -> int:
         if not history:
             print("No valid lowstate sample received yet.", file=sys.stderr)
             return 1
-        write_joint_history_csv(
+        exported_sample_count = write_joint_history_csv(
             history,
             args.joint_name,
             args.csv_path,
             joint_index=target_joint_index,
         )
-        exported_history = _filter_joint_history_samples(history, target_joint_index)
-        print(f"Wrote {len(exported_history)} lowstate samples for `{args.joint_name}` to {args.csv_path}")
+        print(f"Wrote {exported_sample_count} lowstate samples for `{args.joint_name}` to {args.csv_path}")
 
     listener.print_summary(
         preview_joints=max(args.preview_joints, 0),
