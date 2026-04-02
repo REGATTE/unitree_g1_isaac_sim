@@ -106,7 +106,56 @@ Important DDS notes:
 - The direct single-process path keeps the current simulator easier to read and debug while DDS compatibility is still being established.
 - A threaded/shared-memory DDS decoupling layer can be added later if tighter runtime isolation or more flexible producer/consumer separation becomes necessary.
 
-## Baseline DDS Smoke Test
+## Validation Harnesses
+
+There are now two repo-supported validation entrypoints:
+
+- `./scripts/run_dds_smoke_test.sh`
+  fast end-to-end DDS communication check
+- `./scripts/run_full_validation.sh`
+  broader validation harness that runs unit tests plus startup, DDS, tracking,
+  stale-timeout, and cadence phases
+
+### Full Validation Harness
+
+Run this when you want the broadest repo-level validation pass in one command:
+
+```bash
+cd ~/path/to/unitree_g1_isaac_sim
+./scripts/run_full_validation.sh
+```
+
+What it does:
+
+- runs the core Python/unit regression suite
+- checks deterministic startup snapshots across two fresh simulator launches
+- runs the automated DDS smoke test
+- runs a conservative command-tracking capture with CSV export
+- verifies stale lowcmd timeout behavior
+- runs a longer bounded cadence check
+- writes logs under `tmp/full_validation_logs/`
+
+If you want to override the Isaac Sim launcher path explicitly, you can run:
+
+```bash
+cd ~/path/to/unitree_g1_isaac_sim
+ISAACSIM_PYTHON_EXE=/absolute/path/to/isaac-sim/python.sh ./scripts/run_full_validation.sh
+```
+
+Useful environment overrides:
+
+- `DDS_DOMAIN_ID=1`
+- `SIM_STARTUP_TIMEOUT_SECONDS=90`
+- `STARTUP_MAX_FRAMES=300`
+- `TRACKING_LOWCMD_JOINT_NAME=waist_yaw_joint`
+- `TRACKING_LOWCMD_OFFSET_RAD=0.05`
+- `LONG_RUN_MAX_FRAMES=2400`
+
+The detailed checklist for what this harness covers lives in:
+
+- `Agents/full_validation.md`
+
+### Manual DDS Validation Flow
 
 This is the current baseline external DDS validation flow for the repo.
 
@@ -206,7 +255,7 @@ Notes:
 - The current `scripts/lowstate_listener.py` also supports `--joint-name` so you can inspect a specific DDS-order body joint directly during external validation.
 - The richer listener tooling also supports `--csv-path` so you can compare target-joint trajectories over time instead of relying only on one final sample.
 
-## Automated DDS Smoke Test
+### Automated DDS Smoke Test
 
 If `isaac_sim_python` is already available in your shell, you can run the
 baseline DDS smoke test end-to-end with one command:
