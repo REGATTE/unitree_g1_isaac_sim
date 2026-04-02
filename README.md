@@ -39,7 +39,7 @@ source ~/.bashrc
 ### Install Unitree_sdk2_python
 
 ```bash
-# Home FOlder
+# Home Folder
 git clone https://github.com/unitreerobotics/unitree_sdk2_python.git
 cd unitree_sdk2_python
 isaac_sim_python -m pip3 install -e .

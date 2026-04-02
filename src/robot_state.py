@@ -213,39 +213,29 @@ class RobotStateReader:
         Falls back to `set_joint_positions()` only if a dedicated target API is
         unavailable in the current Isaac Sim runtime.
         """
-        self._require_initialized()
-        self._require_physics_view_ready()
-        normalized = _validate_joint_command_width(joint_positions, len(self.joint_names), "joint_positions")
-        if hasattr(self._articulation, "set_joint_position_targets"):
-            self._articulation.set_joint_position_targets(normalized)
-            return True
-        if hasattr(self._articulation, "set_joint_positions"):
-            self._articulation.set_joint_positions(normalized)
-            return True
-        return False
+        return self._apply_joint_vector(
+            joint_positions,
+            label="joint_positions",
+            primary_method="set_joint_position_targets",
+            fallback_method="set_joint_positions",
+        )
 
     def apply_joint_velocity_targets(self, joint_velocities: Sequence[float]) -> bool:
         """Apply a full-body joint-velocity target vector in simulator order."""
-        self._require_initialized()
-        self._require_physics_view_ready()
-        normalized = _validate_joint_command_width(joint_velocities, len(self.joint_names), "joint_velocities")
-        if hasattr(self._articulation, "set_joint_velocity_targets"):
-            self._articulation.set_joint_velocity_targets(normalized)
-            return True
-        if hasattr(self._articulation, "set_joint_velocities"):
-            self._articulation.set_joint_velocities(normalized)
-            return True
-        return False
+        return self._apply_joint_vector(
+            joint_velocities,
+            label="joint_velocities",
+            primary_method="set_joint_velocity_targets",
+            fallback_method="set_joint_velocities",
+        )
 
     def apply_joint_efforts(self, joint_efforts: Sequence[float]) -> bool:
         """Apply a full-body joint-effort vector in simulator order."""
-        self._require_initialized()
-        self._require_physics_view_ready()
-        normalized = _validate_joint_command_width(joint_efforts, len(self.joint_names), "joint_efforts")
-        if hasattr(self._articulation, "set_joint_efforts"):
-            self._articulation.set_joint_efforts(normalized)
-            return True
-        return False
+        return self._apply_joint_vector(
+            joint_efforts,
+            label="joint_efforts",
+            primary_method="set_joint_efforts",
+        )
 
     def apply_joint_gains(self, joint_kp: Sequence[float], joint_kd: Sequence[float]) -> bool:
         """Apply full-body PD gains in simulator joint order.
@@ -285,43 +275,71 @@ class RobotStateReader:
             raise RuntimeError("RobotStateReader must be initialized before reading state.")
 
     def _read_joint_state(self):
-        joint_positions = self._articulation.get_joint_positions()
-        joint_velocities = self._articulation.get_joint_velocities()
-        joint_efforts = None
-        if hasattr(self._articulation, "get_measured_joint_efforts"):
-            joint_efforts = self._articulation.get_measured_joint_efforts()
-        expected_joint_count = len(self.joint_names)
-        normalized_positions = _to_float_list(joint_positions)
-        normalized_velocities = _to_float_list(joint_velocities)
-        normalized_efforts = _to_float_list(joint_efforts) if joint_efforts is not None else None
-        if expected_joint_count == 0:
-            self._raise_physics_view_unavailable("articulation joint names are unavailable")
-        if len(normalized_positions) != expected_joint_count or len(normalized_velocities) != expected_joint_count:
-            self._raise_physics_view_unavailable(
-                "joint state buffers are unavailable "
-                f"(expected {expected_joint_count}, got positions={len(normalized_positions)}, "
-                f"velocities={len(normalized_velocities)})"
-            )
-        if normalized_efforts is not None and len(normalized_efforts) not in (0, expected_joint_count):
-            self._raise_physics_view_unavailable(
-                "joint effort buffer width is invalid "
-                f"(expected {expected_joint_count}, got {len(normalized_efforts)})"
-            )
-        self._mark_physics_view_ready()
-        return normalized_positions, normalized_velocities, normalized_efforts
+        return self._ensure_physics_view_ready(require_velocities=True, require_efforts=True)
 
     def _require_physics_view_ready(self) -> None:
         """Fail fast when the articulation loses its live physics view."""
+        self._ensure_physics_view_ready()
+
+    def _apply_joint_vector(
+        self,
+        values: Sequence[float],
+        *,
+        label: str,
+        primary_method: str,
+        fallback_method: str | None = None,
+    ) -> bool:
+        self._require_initialized()
+        self._require_physics_view_ready()
+        normalized = _validate_joint_command_width(values, len(self.joint_names), label)
+
+        if hasattr(self._articulation, primary_method):
+            getattr(self._articulation, primary_method)(normalized)
+            return True
+
+        if fallback_method is not None and hasattr(self._articulation, fallback_method):
+            getattr(self._articulation, fallback_method)(normalized)
+            return True
+
+        return False
+
+    def _ensure_physics_view_ready(
+        self,
+        *,
+        require_velocities: bool = False,
+        require_efforts: bool = False,
+    ) -> tuple[list[float], list[float] | None, list[float] | None]:
         expected_joint_count = len(self.joint_names)
         if expected_joint_count == 0:
             self._raise_physics_view_unavailable("articulation joint names are unavailable")
-        current_positions = _to_float_list(self._articulation.get_joint_positions())
-        if len(current_positions) != expected_joint_count:
+
+        positions = _to_float_list(self._articulation.get_joint_positions())
+        velocities = None
+        efforts = None
+
+        if require_velocities:
+            velocities = _to_float_list(self._articulation.get_joint_velocities())
+        if require_efforts and hasattr(self._articulation, "get_measured_joint_efforts"):
+            efforts = _to_float_list(self._articulation.get_measured_joint_efforts())
+
+        if len(positions) != expected_joint_count:
             self._raise_physics_view_unavailable(
                 "joint position buffer is unavailable "
-                f"(expected {expected_joint_count}, got {len(current_positions)})"
+                f"(expected {expected_joint_count}, got {len(positions)})"
             )
+        if velocities is not None and len(velocities) != expected_joint_count:
+            self._raise_physics_view_unavailable(
+                "joint velocity buffer is unavailable "
+                f"(expected {expected_joint_count}, got {len(velocities)})"
+            )
+        if efforts is not None and len(efforts) not in (0, expected_joint_count):
+            self._raise_physics_view_unavailable(
+                "joint effort buffer width is invalid "
+                f"(expected {expected_joint_count}, got {len(efforts)})"
+            )
+
         self._mark_physics_view_ready()
+        return positions, velocities, efforts
 
     def _raise_physics_view_unavailable(self, reason: str) -> None:
         if not self._warned_physics_view_unavailable:

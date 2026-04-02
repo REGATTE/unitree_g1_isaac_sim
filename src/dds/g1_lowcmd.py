@@ -9,8 +9,8 @@ snapshot that the runtime loop can translate into Isaac Sim control writes.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 import logging
-from threading import Lock
 import time
 from typing import Any
 
@@ -18,6 +18,17 @@ from mapping.joints import BODY_JOINT_COUNT
 from mapping import reorder_dds_values_to_sim
 
 LOGGER = logging.getLogger("unitree_g1_isaac_sim.dds.lowcmd")
+
+
+@dataclass(frozen=True)
+class SimOrderLowCmd:
+    """Body-joint command vectors in simulator joint order."""
+
+    positions: list[float]
+    velocities: list[float]
+    torques: list[float]
+    kp: list[float]
+    kd: list[float]
 
 
 @dataclass(frozen=True)
@@ -33,19 +44,19 @@ class LowCmdCache:
     joint_kd_dds: tuple[float, ...]
     received_at_monotonic: float
 
-    def to_sim_order(self) -> dict[str, list[float]]:
+    def to_sim_order(self) -> SimOrderLowCmd:
         """Return body-joint command vectors in simulator joint order.
 
         Keeping the DDS-to-simulator remap here ensures the rest of the runtime
         only handles simulator-order control vectors.
         """
-        return {
-            "positions": reorder_dds_values_to_sim(self.joint_positions_dds),
-            "velocities": reorder_dds_values_to_sim(self.joint_velocities_dds),
-            "torques": reorder_dds_values_to_sim(self.joint_torques_dds),
-            "kp": reorder_dds_values_to_sim(self.joint_kp_dds),
-            "kd": reorder_dds_values_to_sim(self.joint_kd_dds),
-        }
+        return SimOrderLowCmd(
+            positions=reorder_dds_values_to_sim(self.joint_positions_dds),
+            velocities=reorder_dds_values_to_sim(self.joint_velocities_dds),
+            torques=reorder_dds_values_to_sim(self.joint_torques_dds),
+            kp=reorder_dds_values_to_sim(self.joint_kp_dds),
+            kd=reorder_dds_values_to_sim(self.joint_kd_dds),
+        )
 
 
 class G1LowCmdSubscriber:
@@ -58,9 +69,6 @@ class G1LowCmdSubscriber:
         self._latest_command: LowCmdCache | None = None
         self._sdk_enabled = False
         self._warned_unavailable = False
-        self._warned_extra_widths: set[int] = set()
-        self._warned_short_widths: set[int] = set()
-        self._warning_state_lock = Lock()
 
     @property
     def latest_command(self) -> LowCmdCache | None:
@@ -99,14 +107,9 @@ class G1LowCmdSubscriber:
             return
 
         motor_cmd = msg.motor_cmd
-        incoming_count = len(motor_cmd)
-        if incoming_count < BODY_JOINT_COUNT:
-            self._warn_short_message(incoming_count)
+        count = self._effective_motor_count(motor_cmd)
+        if count is None:
             return
-        if incoming_count > BODY_JOINT_COUNT:
-            self._warn_extra_message_fields(incoming_count)
-
-        count = BODY_JOINT_COUNT
         self._latest_command = LowCmdCache(
             mode_pr=int(msg.mode_pr),
             mode_machine=int(msg.mode_machine),
@@ -118,12 +121,19 @@ class G1LowCmdSubscriber:
             received_at_monotonic=time.monotonic(),
         )
 
-    def _warn_extra_message_fields(self, incoming_count: int) -> None:
+    def _effective_motor_count(self, motor_cmd: Any) -> int | None:
+        incoming_count = len(motor_cmd)
+        if incoming_count < BODY_JOINT_COUNT:
+            self._warn_short_message(incoming_count)
+            return None
+        if incoming_count > BODY_JOINT_COUNT:
+            self._warn_extra_message_fields(incoming_count)
+        return BODY_JOINT_COUNT
+
+    @staticmethod
+    @lru_cache(maxsize=None)
+    def _warn_extra_message_fields(incoming_count: int) -> None:
         """Log once per width when incoming DDS commands expose extra slots."""
-        with self._warning_state_lock:
-            if incoming_count in self._warned_extra_widths:
-                return
-            self._warned_extra_widths.add(incoming_count)
         LOGGER.warning(
             "[unitree_g1_isaac_sim] received `rt/lowcmd` with %s motor slots; "
             "consuming only the first %s G1 body-joint commands and ignoring the extra entries.",
@@ -131,12 +141,10 @@ class G1LowCmdSubscriber:
             BODY_JOINT_COUNT,
         )
 
-    def _warn_short_message(self, incoming_count: int) -> None:
+    @staticmethod
+    @lru_cache(maxsize=None)
+    def _warn_short_message(incoming_count: int) -> None:
         """Log once per width when incoming DDS commands are too short to use."""
-        with self._warning_state_lock:
-            if incoming_count in self._warned_short_widths:
-                return
-            self._warned_short_widths.add(incoming_count)
         LOGGER.warning(
             "[unitree_g1_isaac_sim] dropped `rt/lowcmd` message with %s motor slots; "
             "expected at least %s body-joint commands.",

@@ -34,6 +34,41 @@ class DdsStepResult:
     lowcmd_fresh: bool
 
 
+@dataclass
+class CadenceTracker:
+    """Track rolling lowstate cadence diagnostics."""
+
+    window_start_time: float | None = None
+    publish_count: int = 0
+
+    def record(self, t: float, expected_hz: float, interval: int, warn_ratio: float) -> None:
+        if interval <= 0:
+            return
+        if self.window_start_time is None:
+            self.window_start_time = t
+            self.publish_count = 1
+            return
+
+        self.publish_count += 1
+        if self.publish_count < interval:
+            return
+
+        elapsed = t - self.window_start_time
+        publishes = self.publish_count
+        observed_hz = 0.0 if elapsed <= 0.0 else (publishes - 1) / elapsed
+        relative_error = 0.0 if expected_hz <= 0.0 else abs(observed_hz - expected_hz) / expected_hz
+        log_prefix = "WARNING" if relative_error > warn_ratio else "INFO"
+        print(
+            "[unitree_g1_isaac_sim] "
+            f"{log_prefix} lowstate cadence check: observed={observed_hz:.3f}Hz "
+            f"expected={expected_hz:.3f}Hz publishes={publishes} "
+            f"window_dt={elapsed:.3f}s rel_error={relative_error:.3%}"
+        )
+
+        self.window_start_time = t
+        self.publish_count = 1
+
+
 class DdsManager:
     """Own the DDS bridge lifecycle for the single-process simulator runtime."""
 
@@ -46,8 +81,7 @@ class DdsManager:
         self._lowstate_publisher = G1LowStatePublisher(topic_name=config.lowstate_topic)
         self._lowcmd_subscriber = G1LowCmdSubscriber(topic_name=config.lowcmd_topic)
         self._warned_stale_lowcmd = False
-        self._cadence_window_start_time: float | None = None
-        self._cadence_window_publish_count = 0
+        self._cadence = CadenceTracker()
 
     @property
     def latest_lowcmd(self) -> LowCmdCache | None:
@@ -98,7 +132,12 @@ class DdsManager:
             lowstate_published = self._lowstate_publisher.publish(snapshot)
             self._next_lowstate_publish_time = simulation_time_seconds + self._lowstate_publish_period
             if lowstate_published:
-                self._record_lowstate_publish(simulation_time_seconds)
+                self._cadence.record(
+                    simulation_time_seconds,
+                    expected_hz=self._config.lowstate_publish_hz,
+                    interval=self._config.lowstate_cadence_report_interval,
+                    warn_ratio=self._config.lowstate_cadence_warn_ratio,
+                )
 
         active_lowcmd = self._resolve_latest_lowcmd(now_monotonic=time.monotonic())
 
@@ -115,65 +154,32 @@ class DdsManager:
         self._sdk_enabled = False
         self._initialized = False
         self._warned_stale_lowcmd = False
-        self._cadence_window_start_time = None
-        self._cadence_window_publish_count = 0
+        self._cadence = CadenceTracker()
 
     def _resolve_latest_lowcmd(self, now_monotonic: float) -> LowCmdCache | None:
         """Return the current fresh lowcmd sample or `None` if stale/absent."""
         cached = self._lowcmd_subscriber.latest_command
+        is_fresh = _is_fresh(now_monotonic, cached, self._config.lowcmd_timeout_seconds)
+        if not is_fresh:
+            if cached is None:
+                self._warned_stale_lowcmd = False
+                return None
+            if not self._warned_stale_lowcmd:
+                age_seconds = now_monotonic - cached.received_at_monotonic
+                print(
+                    "[unitree_g1_isaac_sim] cached `rt/lowcmd` sample went stale "
+                    f"after {age_seconds:.3f}s; stopping command reapplication until a fresh sample arrives."
+                )
+                self._warned_stale_lowcmd = True
+            return None
+
         if cached is None:
             self._warned_stale_lowcmd = False
             return None
-
-        timeout_seconds = self._config.lowcmd_timeout_seconds
-        if timeout_seconds <= 0.0:
-            self._warned_stale_lowcmd = False
-            return cached
-
-        age_seconds = now_monotonic - cached.received_at_monotonic
-        if age_seconds <= timeout_seconds:
-            if self._warned_stale_lowcmd:
-                print("[unitree_g1_isaac_sim] received fresh `rt/lowcmd` again; resuming command application.")
-            self._warned_stale_lowcmd = False
-            return cached
-
-        if not self._warned_stale_lowcmd:
-            print(
-                "[unitree_g1_isaac_sim] cached `rt/lowcmd` sample went stale "
-                f"after {age_seconds:.3f}s; stopping command reapplication until a fresh sample arrives."
-            )
-            self._warned_stale_lowcmd = True
-        return None
-
-    def _record_lowstate_publish(self, simulation_time_seconds: float) -> None:
-        """Accumulate cadence diagnostics for simulation-time lowstate publishes."""
-        interval = self._config.lowstate_cadence_report_interval
-        if interval <= 0:
-            return
-
-        if self._cadence_window_start_time is None:
-            self._cadence_window_start_time = simulation_time_seconds
-            self._cadence_window_publish_count = 1
-            return
-
-        self._cadence_window_publish_count += 1
-        if self._cadence_window_publish_count < interval:
-            return
-
-        elapsed = simulation_time_seconds - self._cadence_window_start_time
-        publish_count = self._cadence_window_publish_count
-        observed_hz = 0.0 if elapsed <= 0.0 else (publish_count - 1) / elapsed
-        expected_hz = self._config.lowstate_publish_hz
-        relative_error = 0.0 if expected_hz <= 0.0 else abs(observed_hz - expected_hz) / expected_hz
-        log_prefix = "WARNING" if relative_error > self._config.lowstate_cadence_warn_ratio else "INFO"
-        print(
-            "[unitree_g1_isaac_sim] "
-            f"{log_prefix} lowstate cadence check: observed={observed_hz:.3f}Hz "
-            f"expected={expected_hz:.3f}Hz publishes={publish_count} "
-            f"window_dt={elapsed:.3f}s rel_error={relative_error:.3%}"
-        )
-        self._cadence_window_start_time = simulation_time_seconds
-        self._cadence_window_publish_count = 1
+        if self._warned_stale_lowcmd:
+            print("[unitree_g1_isaac_sim] received fresh `rt/lowcmd` again; resuming command application.")
+        self._warned_stale_lowcmd = False
+        return cached
 
 
 def _compute_publish_period(publish_hz: float) -> float:
@@ -183,3 +189,12 @@ def _compute_publish_period(publish_hz: float) -> float:
     if not math.isfinite(publish_hz):
         raise ValueError(f"lowstate publish rate must be finite, got {publish_hz}")
     return 1.0 / publish_hz
+
+
+def _is_fresh(now_monotonic: float, cached: LowCmdCache | None, timeout_seconds: float) -> bool:
+    """Return whether a cached lowcmd sample should be treated as fresh."""
+    if cached is None:
+        return False
+    if timeout_seconds <= 0.0:
+        return True
+    return (now_monotonic - cached.received_at_monotonic) <= timeout_seconds

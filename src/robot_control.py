@@ -55,12 +55,12 @@ class RobotCommandApplier:
 
         sim_order_command = lowcmd.to_sim_order()
         try:
-            position_applied = self._state_reader.apply_joint_position_targets(sim_order_command["positions"])
-            velocity_applied = self._state_reader.apply_joint_velocity_targets(sim_order_command["velocities"])
-            effort_applied = self._state_reader.apply_joint_efforts(sim_order_command["torques"])
+            position_applied = self._state_reader.apply_joint_position_targets(sim_order_command.positions)
+            velocity_applied = self._state_reader.apply_joint_velocity_targets(sim_order_command.velocities)
+            effort_applied = self._state_reader.apply_joint_efforts(sim_order_command.torques)
             gains_applied = self._state_reader.apply_joint_gains(
-                sim_order_command["kp"],
-                sim_order_command["kd"],
+                sim_order_command.kp,
+                sim_order_command.kd,
             )
         except PhysicsViewUnavailableError:
             return LowCmdApplyResult(

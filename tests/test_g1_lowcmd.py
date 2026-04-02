@@ -54,8 +54,8 @@ class G1LowCmdSubscriberTests(unittest.TestCase):
         sim_order = cached.to_sim_order()
         sim_first_joint = G1_29DOF_JOINT_MAPPING.sim_joint_names[0]
         dds_index = G1_29DOF_JOINT_MAPPING.dds_name_to_index[sim_first_joint]
-        self.assertEqual(sim_order["positions"][0], 1000.0 + dds_index)
-        self.assertEqual(len(sim_order["positions"]), BODY_JOINT_COUNT)
+        self.assertEqual(sim_order.positions[0], 1000.0 + dds_index)
+        self.assertEqual(len(sim_order.positions), BODY_JOINT_COUNT)
 
     def test_short_messages_are_rejected(self) -> None:
         subscriber = G1LowCmdSubscriber()

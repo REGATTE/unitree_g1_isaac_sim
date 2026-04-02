@@ -18,6 +18,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from mapping.joints import DDS_G1_29DOF_JOINT_NAMES
+from tooling import filter_joint_history_samples, resolve_joint_index
 
 
 @dataclass
@@ -174,26 +175,6 @@ class JointHistorySummary:
     torque_peak_abs: float
 
 
-def resolve_joint_index(joint_name: str) -> int:
-    try:
-        return DDS_G1_29DOF_JOINT_NAMES.index(joint_name)
-    except ValueError as exc:
-        raise ValueError(
-            f"Unsupported DDS joint name `{joint_name}`. "
-            f"Expected one of: {DDS_G1_29DOF_JOINT_NAMES}"
-        ) from exc
-
-
-def _filter_joint_history_samples(history: list[LowStateSample], joint_index: int) -> list[LowStateSample]:
-    return [
-        sample
-        for sample in history
-        if joint_index < len(sample.positions)
-        and joint_index < len(sample.velocities)
-        and joint_index < len(sample.torques)
-    ]
-
-
 def summarize_joint_history(
     history: list[LowStateSample],
     joint_name: str,
@@ -204,7 +185,7 @@ def summarize_joint_history(
         return None
     if joint_index is None:
         joint_index = resolve_joint_index(joint_name)
-    filtered_history = _filter_joint_history_samples(history, joint_index)
+    filtered_history = filter_joint_history_samples(history, joint_index)
     if not filtered_history:
         return None
     start_time = filtered_history[0].received_at_monotonic
@@ -231,7 +212,7 @@ def write_joint_history_csv(
 ) -> int:
     if joint_index is None:
         joint_index = resolve_joint_index(joint_name)
-    filtered_history = _filter_joint_history_samples(history, joint_index)
+    filtered_history = filter_joint_history_samples(history, joint_index)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     start_time = filtered_history[0].received_at_monotonic if filtered_history else 0.0
     with output_path.open("w", newline="") as csv_file:
