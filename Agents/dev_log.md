@@ -703,6 +703,92 @@
   - `python3 -m unittest tests/test_lowstate_listener.py`
   - `python3 -m py_compile scripts/lowstate_listener.py tests/test_lowstate_listener.py`
 
+## ===================================================================================================================================
+
+## 2026-04-02 DDS Baseline Hardening and Docs Reconciliation
+
+- Continued hardening the merged `dds_dev` baseline after the listener/tooling merge.
+
+- Closed the follow-up DDS/runtime review items.
+  - `src/dds/manager.py`
+    - cadence tracking stays extracted in `CadenceTracker`
+    - lowcmd freshness evaluation stays separated in `_is_fresh(...)`
+    - lowstate publish scheduling now advances from the prior target time instead of
+      re-anchoring to the current frame
+    - invalid `lowstate_publish_hz` values now fail with a clearer config-focused error
+  - `src/dds/g1_lowcmd.py`
+    - lowcmd subscriber now initializes the CRC helper before starting the subscriber callback
+      to avoid dropping the first message during immediate callback delivery
+  - `src/robot_state.py`
+    - command-path physics-view liveness checks now use a lighter-weight readiness path instead
+      of going through the full joint-state read helper
+
+- Tightened test coverage around the baseline DDS behavior.
+  - `tests/test_dds_manager.py`
+    - covers the disabled lowcmd-timeout path (`lowcmd_timeout_seconds=0.0`)
+    - covers the non-reanchoring lowstate publish schedule behavior against the
+      120 Hz physics / 100 Hz DDS publish case
+    - now checks publish-frame behavior explicitly instead of relying only on a
+      hard-coded publish count
+  - `tests/test_g1_lowcmd.py`
+    - covers the CRC-before-subscriber-init startup race
+  - `tests/test_lowstate_listener.py`
+    - covers empty-history summary behavior
+    - covers missing-latest-sample summary output
+
+- Reconciled shared tooling and docs.
+  - Added `src/tooling/joints.py` so the standalone DDS helper scripts no longer duplicate
+    joint-name resolution and joint-history filtering logic.
+  - Updated `dds_testing.md` so it no longer claims dynamic `kp` / `kd` is unimplemented.
+  - Re-read and updated `README.md` so it reflects:
+    - the current baseline DDS surface without branch-specific wording
+    - positive finite validation for `--lowstate-publish-hz`
+    - the corrected non-reanchoring lowstate publish schedule behavior
+    - current helper-script validation behavior for listener/publisher CLI arguments
+  - Tightened CLI/config argument validation:
+    - `src/config.py`
+      - `--physics-dt` now requires a positive finite value
+      - `--lowstate-publish-hz` now requires a positive finite value at parse time
+    - `scripts/lowstate_listener.py`
+      - `--duration` now requires a non-negative finite value
+    - `scripts/send_lowcmd_offset.py`
+      - `--rate-hz` now requires a positive finite value
+      - `--duration` and `--seed-timeout` now require non-negative finite values
+  - Added short inline comments in the standalone scripts to clarify:
+    - why `src/` is added to `sys.path` in direct-checkout script usage
+    - why publish-loop timing can now use validated CLI values directly
+
+- Verified during this round:
+  - `python3 -m unittest tests/test_g1_lowcmd.py tests/test_robot_state_pause_safe.py tests/test_robot_control.py tests/test_dds_manager.py tests/test_lowstate_listener.py`
+  - `python3 -m py_compile src/robot_state.py src/robot_control.py src/dds/g1_lowcmd.py src/dds/manager.py src/tooling/__init__.py src/tooling/joints.py scripts/lowstate_listener.py scripts/send_lowcmd_offset.py tests/test_g1_lowcmd.py tests/test_dds_manager.py tests/test_lowstate_listener.py`
+  - `python3 -m py_compile src/config.py scripts/lowstate_listener.py scripts/send_lowcmd_offset.py`
+
+## Current State
+
+- `dds_dev` now contains a coherent baseline body-DDS simulator:
+  - Isaac Sim bootstrap + G1 scene loading
+  - validated 29-DoF simulator-order <-> DDS-order body mapping
+  - `rt/lowstate` publication
+  - `rt/lowcmd` subscription and simulator command application
+  - dynamic `kp` / `kd`
+  - stale-command handling
+  - cadence diagnostics
+  - pause-safe articulation/runtime behavior
+  - external DDS helper tooling for listener/publisher validation
+  - parse-time lower-bound validation on key rate/dt CLI inputs
+
+## Next Steps
+
+- Run one final live end-to-end smoke test directly from the current `dds_dev` head:
+  - launch simulator with DDS enabled
+  - confirm external `rt/lowstate`
+  - send one conservative `rt/lowcmd`
+  - verify visible motion and reflected state
+- After that, the next likely project-level choice is one of:
+  - merge `dds_dev` to `main` and cut a baseline/pre-release
+  - add optional hand DDS topics (`dex1`, `dex3`, `inspire`)
+  - implement deterministic startup/reset semantics
+
 ## Resume Here
 
 - Use the CSV-capable lowstate listener to compare low-gain and high-gain target-joint trajectories from matched startup conditions.

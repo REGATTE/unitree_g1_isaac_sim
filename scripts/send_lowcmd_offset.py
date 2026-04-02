@@ -9,6 +9,7 @@ selected DDS joint. That avoids sending a blind full-body posture jump.
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 import threading
 import time
@@ -18,11 +19,29 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = REPO_ROOT / "src"
+# These helpers are shipped as standalone scripts, so make the in-repo `src/`
+# package importable when the script is launched directly from the checkout.
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from mapping.joints import BODY_JOINT_COUNT, DDS_G1_29DOF_JOINT_NAMES
 from tooling import resolve_joint_index
+
+
+def positive_finite_float(value: str) -> float:
+    """Parse a CLI float argument that must be positive and finite."""
+    parsed = float(value)
+    if not math.isfinite(parsed) or parsed <= 0.0:
+        raise argparse.ArgumentTypeError(f"expected a positive finite float, got {value!r}")
+    return parsed
+
+
+def non_negative_float(value: str) -> float:
+    """Parse a CLI float argument that may be zero but not negative or non-finite."""
+    parsed = float(value)
+    if not math.isfinite(parsed) or parsed < 0.0:
+        raise argparse.ArgumentTypeError(f"expected a non-negative finite float, got {value!r}")
+    return parsed
 
 
 @dataclass
@@ -97,19 +116,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--rate-hz",
-        type=float,
+        type=positive_finite_float,
         default=50.0,
         help="Publish frequency for the command hold burst.",
     )
     parser.add_argument(
         "--duration",
-        type=float,
+        type=non_negative_float,
         default=2.0,
         help="How long to publish the same hold command.",
     )
     parser.add_argument(
         "--seed-timeout",
-        type=float,
+        type=non_negative_float,
         default=5.0,
         help="How long to wait for an initial lowstate seed sample.",
     )
@@ -164,8 +183,10 @@ def main() -> int:
     publisher = ChannelPublisher(args.lowcmd_topic, LowCmd_)
     publisher.Init()
     crc = CRC()
-    period_seconds = 1.0 / max(args.rate_hz, 1e-6)
-    end_time = time.time() + max(args.duration, 0.0)
+    # `--rate-hz` and `--duration` are validated at parse time, so the publish
+    # loop can use the configured values directly here.
+    period_seconds = 1.0 / args.rate_hz
+    end_time = time.time() + args.duration
     publish_count = 0
 
     while time.time() < end_time:

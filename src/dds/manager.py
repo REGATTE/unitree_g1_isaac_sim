@@ -77,7 +77,13 @@ class DdsManager:
         self._initialized = False
         self._sdk_enabled = False
         self._next_lowstate_publish_time = 0.0
-        self._lowstate_publish_period = _compute_publish_period(config.lowstate_publish_hz)
+        lowstate_hz = config.lowstate_publish_hz
+        if lowstate_hz <= 0.0 or not math.isfinite(lowstate_hz):
+            raise ValueError(
+                f"Invalid AppConfig.lowstate_publish_hz={lowstate_hz!r}; "
+                "expected a positive finite frequency in Hz (check --lowstate-publish-hz)."
+            )
+        self._lowstate_publish_period = _compute_publish_period(lowstate_hz)
         self._lowstate_publisher = G1LowStatePublisher(topic_name=config.lowstate_topic)
         self._lowcmd_subscriber = G1LowCmdSubscriber(topic_name=config.lowcmd_topic)
         self._warned_stale_lowcmd = False

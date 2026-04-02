@@ -28,8 +28,8 @@ Important current limitation:
 - the `lowcmd` path should be treated primarily as a position-command path
 - velocity and effort fields are forwarded when the articulation runtime
   exposes matching setters
-- `kp` and `kd` are received and preserved, but dynamic gain application is not
-  implemented yet
+- dynamic `kp` and `kd` application is implemented, but validation should still
+  begin with conservative gain values and a small set of safe joints
 
 ## Launch the Simulator
 
@@ -126,7 +126,7 @@ What to verify:
 ## Safety Notes
 
 - Do not begin with aggressive full-body commands.
-- Do not assume `kp` and `kd` are active in the current implementation.
+- Do not begin with aggressive `kp` / `kd` changes across the whole body.
 - Start with small position offsets and inspect the response before sending
   broader body commands.
 - If a real robot is present on the same DDS network, keep the topic/domain

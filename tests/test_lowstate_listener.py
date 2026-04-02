@@ -40,6 +40,11 @@ def _make_sample(received_at_monotonic: float, tick: int, joint_index: int, q: f
 
 
 class LowStateListenerHelperTests(unittest.TestCase):
+    def test_summarize_joint_history_returns_none_for_empty_history(self):
+        summary = summarize_joint_history([], "left_shoulder_pitch_joint")
+
+        self.assertIsNone(summary)
+
     def test_summarize_joint_history_reports_basic_extrema(self):
         history = [
             _make_sample(10.0, 100, 15, 0.10, 0.20, -1.0),
@@ -152,6 +157,24 @@ class LowStateListenerHelperTests(unittest.TestCase):
         self.assertIn("tick=301 valid_messages=2 crc_rejected=1", rendered)
         self.assertIn("target_history left_shoulder_pitch_joint: samples=2 duration_s=0.100", rendered)
         self.assertIn("q_max=0.25000", rendered)
+
+    def test_print_lowstate_capture_summary_handles_missing_latest_sample(self):
+        capture = LowStateCapture(
+            latest=None,
+            history=[],
+            messages_seen=0,
+            messages_rejected=0,
+        )
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            print_lowstate_capture_summary(
+                capture,
+                preview_joints=0,
+                target_joint_name="left_shoulder_pitch_joint",
+            )
+
+        self.assertIn("No valid lowstate sample received yet.", output.getvalue())
 
 
 if __name__ == "__main__":

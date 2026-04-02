@@ -279,7 +279,7 @@ class RobotStateReader:
 
     def _require_physics_view_ready(self) -> None:
         """Fail fast when the articulation loses its live physics view."""
-        self._ensure_physics_view_ready()
+        self._ensure_physics_view_liveness()
 
     def _apply_joint_vector(
         self,
@@ -340,6 +340,21 @@ class RobotStateReader:
 
         self._mark_physics_view_ready()
         return positions, velocities, efforts
+
+    def _ensure_physics_view_liveness(self) -> None:
+        """Validate that the articulation physics view is present for control writes."""
+        expected_joint_count = len(self.joint_names)
+        if expected_joint_count == 0:
+            self._raise_physics_view_unavailable("articulation joint names are unavailable")
+
+        positions = self._articulation.get_joint_positions()
+        position_count = len(_to_float_list(positions))
+        if position_count != expected_joint_count:
+            self._raise_physics_view_unavailable(
+                "joint position buffer is unavailable "
+                f"(expected {expected_joint_count}, got {position_count})"
+            )
+        self._mark_physics_view_ready()
 
     def _raise_physics_view_unavailable(self, reason: str) -> None:
         if not self._warned_physics_view_unavailable:

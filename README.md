@@ -68,7 +68,7 @@ isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py
 | `--asset-path` | Override the default USD path with a specific asset file. | Uses the default asset path for the selected `--robot-variant`. | `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --asset-path ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/Models/USD/29dof/usd/g1_29dof_rev_1_0/g1_29dof_rev_1_0.usd` |
 | `--robot-prim-path` | Prim path where the robot is referenced into the stage. | `/World/G1` | `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --robot-prim-path /World/G1` |
 | `--robot-height` | Initial root height in meters for the referenced robot prim. | `0.8` | `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --robot-height 0.8` |
-| `--physics-dt` | Isaac Sim physics timestep in seconds. | `1.0 / 120.0` | `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --physics-dt 0.0083333333` |
+| `--physics-dt` | Isaac Sim physics timestep in seconds. Must be a positive finite value. | `1.0 / 120.0` | `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --physics-dt 0.0083333333` |
 | `--headless` | Run without the Isaac Sim GUI window. | `False` | `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --headless` |
 | `--renderer` | Renderer passed into `SimulationApp`. | `RayTracedLighting` | `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --renderer RayTracedLighting` |
 | `--width` | Isaac Sim window width. | `1280` | `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --width 1280` |
@@ -79,26 +79,28 @@ isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py
 | `--dds-domain-id` | DDS domain id passed into the Unitree SDK channel factory. | `1` |  `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --enable-dds --dds-domain-id 1` |
 | `--lowstate-topic` | DDS topic used for low-level state publication. | `rt/lowstate` |  `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --enable-dds --lowstate-topic rt/lowstate` |
 | `--lowcmd-topic` | DDS topic used for low-level command subscription. | `rt/lowcmd` |  `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --enable-dds --lowcmd-topic rt/lowcmd` |
-| `--lowstate-publish-hz` | Target DDS publish rate for `rt/lowstate`. | `100.0` |  `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --enable-dds --lowstate-publish-hz 100` |
+| `--lowstate-publish-hz` | Target DDS publish rate for `rt/lowstate`. Must be a positive finite value. | `100.0` |  `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --enable-dds --lowstate-publish-hz 100` |
 | `--enable-lowcmd-subscriber` | Create the `rt/lowcmd` subscriber and apply cached body commands into the articulation. | `False` |  `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --enable-dds --enable-lowcmd-subscriber` |
 | `--lowcmd-timeout-seconds` | How long a cached `rt/lowcmd` sample stays fresh before the runtime stops reapplying it. `0` disables timeout handling. | `0.5` | `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --enable-dds --enable-lowcmd-subscriber --lowcmd-timeout-seconds 0.5` |
 | `--lowstate-cadence-report-interval` | Number of `rt/lowstate` publishes to accumulate before logging the observed simulation-time publish cadence. `0` disables cadence logs. | `500` | `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --enable-dds --lowstate-cadence-report-interval 500` |
 | `--lowstate-cadence-warn-ratio` | Relative error threshold for cadence diagnostics. Larger drift than this ratio is logged as a warning. | `0.05` | `isaac_sim_python ~/Workspaces/ros2_ws/src/unitree_g1_isaac_sim/src/main.py --enable-dds --lowstate-cadence-warn-ratio 0.05` |
 
-Important DDS note:
+Important DDS notes:
 
 - The intent of this project is to make Isaac Sim look like a real G1 at the DDS boundary.
 - The simulator should publish the same low-level topics a real robot publishes so higher-level clients such as `unitree_sdk2` or `unitree_ros2` can run on top without simulator-specific adaptations.
-- The current baseline DDS path on `dds_dev` is:
+- The current baseline DDS path is:
   - publish `rt/lowstate`
   - subscribe to `rt/lowcmd`
   - apply cached body commands back into the articulation
 - The current control slice should still be treated primarily as a conservative position-command path, but it now also forwards velocity, effort, and dynamic `kp` / `kd` gains when the articulation runtime exposes the corresponding setters.
 - Cached `rt/lowcmd` samples are now treated as fresh only for `--lowcmd-timeout-seconds`.
   - When a command goes stale, the runtime stops reapplying it until a fresh DDS sample arrives again.
+- `--lowstate-publish-hz` must be a positive finite value.
 - `rt/lowstate` cadence now has built-in simulation-time diagnostics.
   - The runtime reports the observed publish rate every `--lowstate-cadence-report-interval` publishes.
   - If the observed rate drifts from `--lowstate-publish-hz` by more than `--lowstate-cadence-warn-ratio`, the runtime emits a warning.
+  - The scheduler now advances from the prior target time instead of re-anchoring to the current frame, which keeps the effective publish cadence aligned with the configured DDS rate more closely when physics dt and publish period are not exact multiples.
 - The current DDS manager runs inside the same Isaac Sim process and main simulation loop.
 - This is intentionally simpler than the Isaac Lab reference, which uses a heavier shared-memory and threaded structure between simulation state production and DDS I/O.
 - The direct single-process path keeps the current simulator easier to read and debug while DDS compatibility is still being established.
@@ -193,8 +195,13 @@ Notes:
 
 - Start with small offsets only.
 - Keep the DDS domain id matched across the simulator and test scripts.
+- `scripts/lowstate_listener.py` validates `--duration` as a non-negative finite value.
+- `scripts/send_lowcmd_offset.py` validates:
+  - `--rate-hz` as a positive finite value
+  - `--duration` as a non-negative finite value
+  - `--seed-timeout` as a non-negative finite value
 - If `isaac_sim_python` says `unitree_sdk2py` is unavailable, install it into Isaac Sim's Python, not only into your separate local test environment.
-- The current `dds_dev` branch now clamps wider incoming `LowCmd_` shapes to the supported 29 body joints instead of crashing on extra slots.
+- Wider incoming `LowCmd_` shapes are clamped to the supported 29 body joints instead of crashing on extra slots.
 - If `rt/lowcmd` traffic stops for longer than `--lowcmd-timeout-seconds`, the simulator stops reapplying the cached command until a fresh sample arrives.
 - The current `scripts/lowstate_listener.py` also supports `--joint-name` so you can inspect a specific DDS-order body joint directly during external validation.
 - The richer listener tooling also supports `--csv-path` so you can compare target-joint trajectories over time instead of relying only on one final sample.

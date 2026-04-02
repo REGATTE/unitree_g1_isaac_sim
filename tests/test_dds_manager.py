@@ -135,11 +135,18 @@ class DdsManagerTests(unittest.TestCase):
         manager._lowcmd_subscriber = _FakeLowCmdSubscriber()
 
         snapshot = object()
+        published_frames = []
         for frame_index in range(1, 13):
             simulation_time_seconds = frame_index * (1.0 / 120.0)
-            manager.step(simulation_time_seconds, snapshot)
+            result = manager.step(simulation_time_seconds, snapshot)
+            if result.lowstate_published:
+                published_frames.append(frame_index)
 
-        self.assertEqual(manager._lowstate_publisher.publish_calls, 11)
+        self.assertEqual(
+            published_frames,
+            [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12],
+        )
+        self.assertEqual(manager._lowstate_publisher.publish_calls, len(published_frames))
 
 
 if __name__ == "__main__":

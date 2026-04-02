@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -14,6 +15,14 @@ DEFAULT_ASSET_BY_VARIANT = {
     "23dof": MODELS_ROOT / "23dof" / "usd" / "g1_23dof_rev_1_0" / "g1_23dof_rev_1_0.usd",
     "29dof": MODELS_ROOT / "29dof" / "usd" / "g1_29dof_rev_1_0" / "g1_29dof_rev_1_0.usd",
 }
+
+
+def positive_finite_float(value: str) -> float:
+    """Parse a CLI float argument that must be positive and finite."""
+    parsed = float(value)
+    if not math.isfinite(parsed) or parsed <= 0.0:
+        raise argparse.ArgumentTypeError(f"expected a positive finite float, got {value!r}")
+    return parsed
 
 
 @dataclass(frozen=True)
@@ -84,7 +93,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--physics-dt",
-        type=float,
+        type=positive_finite_float,
         default=1.0 / 120.0,
         help="Physics timestep in seconds.",
     )
@@ -150,7 +159,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--lowstate-publish-hz",
-        type=float,
+        type=positive_finite_float,
         default=100.0,
         help="Target DDS publish rate in Hz for `rt/lowstate`.",
     )

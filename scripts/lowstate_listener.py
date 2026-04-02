@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import math
 import sys
 import threading
 import time
@@ -14,11 +15,21 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = REPO_ROOT / "src"
+# These helpers are shipped as standalone scripts, so make the in-repo `src/`
+# package importable when the script is launched directly from the checkout.
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from mapping.joints import DDS_G1_29DOF_JOINT_NAMES
 from tooling import filter_joint_history_samples, resolve_joint_index
+
+
+def non_negative_float(value: str) -> float:
+    """Parse a CLI float argument that may be zero but not negative or non-finite."""
+    parsed = float(value)
+    if not math.isfinite(parsed) or parsed < 0.0:
+        raise argparse.ArgumentTypeError(f"expected a non-negative finite float, got {value!r}")
+    return parsed
 
 
 @dataclass
@@ -238,7 +249,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--topic", type=str, default="rt/lowstate", help="Lowstate DDS topic.")
     parser.add_argument(
         "--duration",
-        type=float,
+        type=non_negative_float,
         default=5.0,
         help="Seconds to wait before printing the latest sample summary.",
     )
