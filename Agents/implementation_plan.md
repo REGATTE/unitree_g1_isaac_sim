@@ -75,7 +75,8 @@ High-level flow:
 Planned code structure under `src/unitree_g1_isaac_sim/src`:
 
 - `main.py`
-  Isaac Sim entrypoint, launched through `./isaac_sim.sh -p main.py`
+  Isaac Sim entrypoint, launched with Isaac Sim's Python runtime:
+  `isaac_sim_python src/main.py`
 - `scene.py`
   stage setup, world creation, robot spawning, reset helpers
 - `robot_state.py`
@@ -111,6 +112,13 @@ Existing package assets should stay outside the runtime source tree:
 
 - `src/unitree_g1_isaac_sim/Models/`
   robot USD assets
+
+Validation and DDS helper tooling should stay outside the runtime source tree:
+
+- `scripts/`
+  standalone listeners, publishers, and analysis helpers launched with the
+  system Python runtime, for example:
+  `python scripts/lowstate_listener.py`
 
 ## Entry Point Responsibility
 

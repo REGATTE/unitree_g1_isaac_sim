@@ -123,6 +123,39 @@ cd ~/path/to/unitree_g1_isaac_sim
 python3 scripts/lowstate_listener.py --dds-domain-id 1 --duration 5
 ```
 
+To inspect one specific DDS-order body joint directly:
+
+```bash
+cd ~/path/to/unitree_g1_isaac_sim
+python3 scripts/lowstate_listener.py \
+  --dds-domain-id 1 \
+  --duration 5 \
+  --joint-name left_shoulder_pitch_joint
+```
+
+To export that target joint as a CSV time series:
+
+```bash
+cd ~/path/to/unitree_g1_isaac_sim
+python3 scripts/lowstate_listener.py \
+  --dds-domain-id 1 \
+  --duration 10 \
+  --joint-name left_shoulder_pitch_joint \
+  --csv-path /tmp/left_shoulder_pitch_joint_lowstate.csv
+```
+
+CSV notes:
+
+- `--csv-path` requires `--joint-name`
+- the CSV contains one row per received `rt/lowstate` sample for the selected joint
+- columns are:
+  - `time_s`
+  - `tick`
+  - `joint_name`
+  - `q`
+  - `dq`
+  - `tau`
+
 Expected result:
 
 - `tick` increases
@@ -164,6 +197,39 @@ Notes:
 - The current `dds_dev` branch now clamps wider incoming `LowCmd_` shapes to the supported 29 body joints instead of crashing on extra slots.
 - If `rt/lowcmd` traffic stops for longer than `--lowcmd-timeout-seconds`, the simulator stops reapplying the cached command until a fresh sample arrives.
 - The current `scripts/lowstate_listener.py` also supports `--joint-name` so you can inspect a specific DDS-order body joint directly during external validation.
+- The richer listener tooling also supports `--csv-path` so you can compare target-joint trajectories over time instead of relying only on one final sample.
+
+## Why Time-Series Lowstate Tooling Matters
+
+The basic DDS smoke test already proves the core body interface works:
+
+- `rt/lowstate` is externally visible
+- `rt/lowcmd` reaches the simulator
+- dynamic `kp` / `kd` gains are applied on the simulator side
+
+However, a single final lowstate snapshot is only enough to show that something changed.
+It does not tell you:
+
+- how fast the target joint moved
+- whether it overshot
+- whether it oscillated
+- whether damping is too weak
+- whether two different gain settings produced materially different trajectories
+
+That is why the richer `lowstate_listener.py` tooling exists.
+It turns DDS validation from:
+
+- "something moved"
+
+into:
+
+- "for this target joint, here is `q(t)`, `dq(t)`, and `tau(t)` over the command window"
+
+This is useful for:
+
+- validating dynamic gain application more rigorously
+- comparing controller behavior across gain settings
+- debugging future locomotion-controller integration over the same external DDS contract
 
 ## TODO
 

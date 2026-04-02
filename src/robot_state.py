@@ -346,7 +346,9 @@ class RobotStateReader:
         math uses the raw Isaac Sim convention directly.
         """
         if not hasattr(self._articulation, "get_world_poses"):
-            return [0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]
+            # Keep the fallback aligned with the documented scalar-first `wxyz`
+            # convention: identity rotation is [1, 0, 0, 0].
+            return [0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]
         positions, orientations = self._articulation.get_world_poses()
         return (
             _to_fixed_float_list(positions, 3, strict=True),

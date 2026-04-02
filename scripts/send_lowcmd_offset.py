@@ -52,6 +52,16 @@ class LowStateSeedListener:
         return self._seed
 
 
+def resolve_joint_index(joint_name: str) -> int:
+    try:
+        return DDS_G1_29DOF_JOINT_NAMES.index(joint_name)
+    except ValueError as exc:
+        raise ValueError(
+            f"Unsupported DDS joint name `{joint_name}`. "
+            f"Expected one of: {DDS_G1_29DOF_JOINT_NAMES}"
+        ) from exc
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Publish a conservative G1 `rt/lowcmd` offset.")
     parser.add_argument("--dds-domain-id", type=int, default=1, help="DDS domain id.")
@@ -127,6 +137,12 @@ def main() -> int:
         print(f"Failed to import unitree_sdk2py: {exc}", file=sys.stderr)
         return 1
 
+    try:
+        target_index = resolve_joint_index(args.joint_name)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
     ChannelFactoryInitialize(args.dds_domain_id)
 
     seed_listener = LowStateSeedListener()
@@ -149,7 +165,6 @@ def main() -> int:
         )
         return 1
 
-    target_index = DDS_G1_29DOF_JOINT_NAMES.index(args.joint_name)
     target_positions = list(seed.positions[:BODY_JOINT_COUNT])
     target_positions[target_index] += args.offset_rad
     target_kp = float(args.default_kp if args.target_kp is None else args.target_kp)
