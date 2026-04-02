@@ -91,9 +91,9 @@ class G1LowCmdSubscriber:
                 self._warned_unavailable = True
             return False
 
+        self._crc_helper = CRC()
         self._subscriber = ChannelSubscriber(self._topic_name, LowCmd_)
         self._subscriber.Init(self._on_message, 32)
-        self._crc_helper = CRC()
         self._sdk_enabled = True
         LOGGER.info("[unitree_g1_isaac_sim] DDS lowcmd subscriber ready on %s", self._topic_name)
         return True

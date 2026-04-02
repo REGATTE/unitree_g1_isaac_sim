@@ -127,6 +127,20 @@ class DdsManagerTests(unittest.TestCase):
         self.assertIn("lowstate cadence check", output.getvalue())
         self.assertIn("observed=100.000Hz", output.getvalue())
 
+    def test_lowstate_schedule_does_not_reanchor_to_current_frame(self):
+        manager = DdsManager(_build_config())
+        manager._initialized = True
+        manager._sdk_enabled = True
+        manager._lowstate_publisher = _FakeLowStatePublisher()
+        manager._lowcmd_subscriber = _FakeLowCmdSubscriber()
+
+        snapshot = object()
+        for frame_index in range(1, 13):
+            simulation_time_seconds = frame_index * (1.0 / 120.0)
+            manager.step(simulation_time_seconds, snapshot)
+
+        self.assertEqual(manager._lowstate_publisher.publish_calls, 11)
+
 
 if __name__ == "__main__":
     unittest.main()

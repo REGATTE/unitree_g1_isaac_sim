@@ -130,7 +130,7 @@ class DdsManager:
         lowstate_published = False
         if self._sdk_enabled and simulation_time_seconds >= self._next_lowstate_publish_time:
             lowstate_published = self._lowstate_publisher.publish(snapshot)
-            self._next_lowstate_publish_time = simulation_time_seconds + self._lowstate_publish_period
+            self._advance_lowstate_publish_schedule(simulation_time_seconds)
             if lowstate_published:
                 self._cadence.record(
                     simulation_time_seconds,
@@ -154,6 +154,7 @@ class DdsManager:
         self._sdk_enabled = False
         self._initialized = False
         self._warned_stale_lowcmd = False
+        self._next_lowstate_publish_time = 0.0
         self._cadence = CadenceTracker()
 
     def _resolve_latest_lowcmd(self, now_monotonic: float) -> LowCmdCache | None:
@@ -180,6 +181,11 @@ class DdsManager:
             print("[unitree_g1_isaac_sim] received fresh `rt/lowcmd` again; resuming command application.")
         self._warned_stale_lowcmd = False
         return cached
+
+    def _advance_lowstate_publish_schedule(self, simulation_time_seconds: float) -> None:
+        """Advance the next publish target from the prior schedule, not the current frame."""
+        while self._next_lowstate_publish_time <= simulation_time_seconds:
+            self._next_lowstate_publish_time += self._lowstate_publish_period
 
 
 def _compute_publish_period(publish_hz: float) -> float:
