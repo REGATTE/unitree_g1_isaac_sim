@@ -420,3 +420,93 @@
   - dynamic `kp` / `kd` application
   - stricter publish-rate validation
   - optional hand DDS topics
+
+## ===================================================================================================================================
+
+## 2026-04-01 DDS LowCmd Width Handling Merged
+
+- Merged the DDS-boundary width fix for incoming `LowCmd_` messages into `dds_dev`.
+  - `src/dds/g1_lowcmd.py` no longer trusts the full incoming `motor_cmd` width.
+  - The subscriber now:
+    - rejects messages shorter than the supported 29 body joints
+    - consumes only the first 29 body-joint slots from wider messages
+    - ignores extra slots without crashing the simulator
+    - logs the unexpected incoming width once per width value
+
+- This closes the externally observed crash path from the standalone DDS test.
+  - The previous failure was:
+    - `ValueError: Expected 29 dds-ordered values, got 35`
+  - The fix keeps the DDS boundary aligned with the frozen 29-DoF body mapping instead of letting extra message slots leak into the simulator-order conversion helpers.
+
+- Project-state reconciliation after the merge:
+  - `rt/lowstate` external visibility is already validated.
+  - `rt/lowcmd` transport reachability is already validated.
+  - The remaining baseline bring-up task is to re-run the external smoke test and confirm visible conservative joint motion with the merged width handling in place.
+
+## Resume Here
+
+- Re-run the baseline DDS smoke test on `dds_dev`:
+  - listener on `rt/lowstate`
+  - conservative publisher on `rt/lowcmd`
+- Confirm that:
+  - the simulator stays alive on the 35-slot `LowCmd_` shape
+  - the targeted body joint moves in Isaac Sim
+  - the motion is reflected back on `rt/lowstate`
+- After that, the most likely next implementation choice is one of:
+  - dynamic `kp` / `kd` application
+  - stricter publish-rate and real-contract validation
+  - optional hand DDS topics
+
+## ===================================================================================================================================
+
+## 2026-04-02 Pause-Safe Runtime Hardening
+
+- Created the pause-safe follow-up branch:
+  - `feat/pause-safe-runtime`
+
+- Re-ran the baseline external DDS smoke test on the branch.
+  - Confirmed again that:
+    - `rt/lowstate` is externally visible
+    - CRC passes on the external receive path
+    - wider `35`-slot incoming `LowCmd_` traffic no longer crashes the simulator
+    - conservative body-joint commands produce visible motion and are reflected back on `rt/lowstate`
+
+- Identified a separate runtime edge case during manual testing.
+  - If Isaac Sim is paused or is entering shutdown, articulation APIs can temporarily stop exposing a valid physics simulation view.
+  - In that state, Isaac Sim starts returning empty joint buffers and warning:
+    - `Physics Simulation View is not created yet ...`
+  - The previous runtime treated that as fatal because the DDS state path still tried to relabel an empty simulator-order joint vector.
+
+- Hardened the articulation boundary and main loop against that condition.
+  - Added a recoverable `PhysicsViewUnavailableError` in `src/robot_state.py`.
+  - Joint-state reads now fail explicitly when the articulation physics view drops instead of silently returning malformed empty state.
+  - Joint-command application now checks that the articulation physics view is live before applying position, velocity, or effort targets.
+  - `src/robot_control.py` now treats that condition as a skipped command application for the affected frame.
+  - `src/main.py` now skips DDS publication for frames where the articulation physics view is unavailable instead of aborting the whole runtime.
+  - When the physics view returns, the runtime logs that DDS/state updates are resuming.
+
+- Added pure-Python regression coverage.
+  - Added `tests/test_g1_lowcmd.py`:
+    - covers the merged `35`-slot lowcmd width handling
+    - covers rejection of short lowcmd messages
+  - Added `tests/test_robot_state_pause_safe.py`:
+    - covers recoverable failure on empty articulation joint-state buffers
+    - covers recovery logging state reset when valid joint buffers return
+
+- Documentation and repo-state reconciliation carried forward on this branch.
+  - `README.md` no longer claims the lowcmd width fix is still pending.
+  - The dev log now reflects both:
+    - the merged DDS width-handling fix
+    - the pause-safe runtime hardening follow-up
+
+- Verified during this round:
+  - `python3 -m unittest tests/test_g1_lowcmd.py tests/test_robot_state_pause_safe.py`
+  - `python3 -m py_compile src/main.py src/robot_state.py src/robot_control.py tests/test_robot_state_pause_safe.py`
+
+## Resume Here
+
+- Keep this branch as the staging point before the next DDS follow-up.
+- The next implementation work should now focus on one of:
+  - dynamic `kp` / `kd` application
+  - stricter publish-rate and real-contract validation
+  - optional hand DDS topics

@@ -15,7 +15,13 @@ from config import PROJECT_ROOT, AppConfig, parse_config
 from dds import DdsManager
 from mapping import log_joint_validation_report, to_dds_ordered_snapshot, validate_live_joint_order
 from robot_control import RobotCommandApplier
-from robot_state import JointStateSnapshot, RobotStateReader, log_joint_state, log_kinematic_snapshot
+from robot_state import (
+    JointStateSnapshot,
+    PhysicsViewUnavailableError,
+    RobotStateReader,
+    log_joint_state,
+    log_kinematic_snapshot,
+)
 from scene import build_scene
 
 
@@ -72,8 +78,12 @@ def run_main_loop(
             frame_count += 1
             simulation_time_seconds += physics_dt
             if dds_manager is not None:
-                snapshot = state_reader.read_kinematic_snapshot(sample_dt=physics_dt)
-                dds_manager.step(simulation_time_seconds, snapshot)
+                try:
+                    snapshot = state_reader.read_kinematic_snapshot(sample_dt=physics_dt)
+                except PhysicsViewUnavailableError:
+                    snapshot = None
+                if snapshot is not None:
+                    dds_manager.step(simulation_time_seconds, snapshot)
             if max_frames > 0 and frame_count >= max_frames:
                 break
     except KeyboardInterrupt:

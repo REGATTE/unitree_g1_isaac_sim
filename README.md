@@ -154,7 +154,8 @@ Notes:
 - Start with small offsets only.
 - Keep the DDS domain id matched across the simulator and test scripts.
 - If `isaac_sim_python` says `unitree_sdk2py` is unavailable, install it into Isaac Sim's Python, not only into your separate local test environment.
-- The current `dds_dev` branch baseline test already validates the external DDS path, but wider incoming `LowCmd_` message widths still need the follow-up width-handling fix branch to be merged.
+- The current `dds_dev` branch now clamps wider incoming `LowCmd_` shapes to the supported 29 body joints instead of crashing on extra slots.
+- The next validation is to re-run this smoke test end to end and confirm the conservative commanded motion is reflected back on `rt/lowstate`.
 
 ## TODO
 
