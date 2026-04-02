@@ -29,6 +29,7 @@ class LowCmdApplyResult:
     position_applied: bool
     velocity_applied: bool
     effort_applied: bool
+    gains_applied: bool
 
 
 class RobotCommandApplier:
@@ -52,6 +53,7 @@ class RobotCommandApplier:
                 position_applied=False,
                 velocity_applied=False,
                 effort_applied=False,
+                gains_applied=False,
             )
 
         sim_order_command = lowcmd.to_sim_order()
@@ -59,23 +61,29 @@ class RobotCommandApplier:
             position_applied = self._state_reader.apply_joint_position_targets(sim_order_command["positions"])
             velocity_applied = self._state_reader.apply_joint_velocity_targets(sim_order_command["velocities"])
             effort_applied = self._state_reader.apply_joint_efforts(sim_order_command["torques"])
+            gains_applied = self._state_reader.apply_joint_gains(
+                sim_order_command["kp"],
+                sim_order_command["kd"],
+            )
         except PhysicsViewUnavailableError:
             return LowCmdApplyResult(
                 command_seen=True,
                 position_applied=False,
                 velocity_applied=False,
                 effort_applied=False,
+                gains_applied=False,
             )
 
-        self._warn_if_gains_are_not_applied(lowcmd)
+        self._warn_if_gains_are_not_applied(lowcmd, gains_applied)
         return LowCmdApplyResult(
             command_seen=True,
             position_applied=position_applied,
             velocity_applied=velocity_applied,
             effort_applied=effort_applied,
+            gains_applied=gains_applied,
         )
 
-    def _warn_if_gains_are_not_applied(self, lowcmd: LowCmdCache) -> None:
+    def _warn_if_gains_are_not_applied(self, lowcmd: LowCmdCache, gains_applied: bool) -> None:
         """Emit a one-time note about `kp`/`kd` support gaps.
 
         The command cache preserves the gain values because they are part of
@@ -84,6 +92,8 @@ class RobotCommandApplier:
         Isaac Sim runtime API for dynamic per-joint gain updates is selected
         for this project.
         """
+        if gains_applied:
+            return
         if self._warned_about_gains:
             return
         if any(value != 0.0 for value in lowcmd.joint_kp_dds) or any(value != 0.0 for value in lowcmd.joint_kd_dds):

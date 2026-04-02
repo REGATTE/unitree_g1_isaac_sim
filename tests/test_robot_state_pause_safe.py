@@ -17,6 +17,8 @@ class _FakeArticulation:
         self._positions = positions
         self._velocities = velocities
         self._efforts = efforts
+        self.last_kps = None
+        self.last_kds = None
 
     def get_joint_positions(self):
         return self._positions
@@ -26,6 +28,10 @@ class _FakeArticulation:
 
     def get_measured_joint_efforts(self):
         return self._efforts
+
+    def set_gains(self, kps=None, kds=None):
+        self.last_kps = kps
+        self.last_kds = kds
 
 
 class RobotStatePauseSafeTests(unittest.TestCase):
@@ -66,6 +72,23 @@ class RobotStatePauseSafeTests(unittest.TestCase):
         self.assertEqual(velocities, [0.0, 0.0])
         self.assertEqual(efforts, [0.0, 0.0])
         self.assertFalse(reader._warned_physics_view_unavailable)
+
+    def test_joint_gains_apply_through_articulation_set_gains(self):
+        articulation = _FakeArticulation(
+            dof_names=["joint_a", "joint_b"],
+            positions=[0.1, 0.2],
+            velocities=[0.0, 0.0],
+            efforts=[0.0, 0.0],
+        )
+        reader = self._make_reader(articulation)
+
+        applied = reader.apply_joint_gains([10.0, 20.0], [1.0, 2.0])
+
+        self.assertTrue(applied)
+        self.assertEqual(articulation.last_kps.shape, (1, 2))
+        self.assertEqual(articulation.last_kds.shape, (1, 2))
+        self.assertEqual(articulation.last_kps.tolist(), [[10.0, 20.0]])
+        self.assertEqual(articulation.last_kds.tolist(), [[1.0, 2.0]])
 
 
 if __name__ == "__main__":

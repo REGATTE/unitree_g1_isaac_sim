@@ -11,6 +11,8 @@ from dataclasses import dataclass
 import math
 from typing import Sequence
 
+import numpy as np
+
 
 _GRAVITY_MAGNITUDE_MPS2 = 9.81
 _WORLD_GRAVITY_VECTOR = (0.0, 0.0, -_GRAVITY_MAGNITUDE_MPS2)
@@ -243,6 +245,39 @@ class RobotStateReader:
         if hasattr(self._articulation, "set_joint_efforts"):
             self._articulation.set_joint_efforts(normalized)
             return True
+        return False
+
+    def apply_joint_gains(self, joint_kp: Sequence[float], joint_kd: Sequence[float]) -> bool:
+        """Apply full-body PD gains in simulator joint order.
+
+        Unitree `kp` and `kd` are mapped directly onto Isaac Sim articulation
+        stiffness and damping. The primary path uses `Articulation.set_gains`,
+        which is the stable API exposed by the current Isaac Sim runtime. A
+        controller-level fallback is kept for compatibility with runtimes that
+        only expose gain updates through `get_articulation_controller()`.
+        """
+        self._require_initialized()
+        self._require_physics_view_ready()
+        joint_count = len(self.joint_names)
+        normalized_kp = _validate_joint_command_width(joint_kp, joint_count, "joint_kp")
+        normalized_kd = _validate_joint_command_width(joint_kd, joint_count, "joint_kd")
+
+        if hasattr(self._articulation, "set_gains"):
+            self._articulation.set_gains(
+                kps=np.expand_dims(np.asarray(normalized_kp, dtype=np.float32), axis=0),
+                kds=np.expand_dims(np.asarray(normalized_kd, dtype=np.float32), axis=0),
+            )
+            return True
+
+        if hasattr(self._articulation, "get_articulation_controller"):
+            controller = self._articulation.get_articulation_controller()
+            if controller is not None and hasattr(controller, "set_gains"):
+                controller.set_gains(
+                    kps=np.asarray(normalized_kp, dtype=np.float32),
+                    kds=np.asarray(normalized_kd, dtype=np.float32),
+                )
+                return True
+
         return False
 
     def _require_initialized(self) -> None:

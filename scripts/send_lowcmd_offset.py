@@ -71,16 +71,28 @@ def build_parser() -> argparse.ArgumentParser:
         help="Position offset in radians added to the latest lowstate pose.",
     )
     parser.add_argument(
-        "--kp",
+        "--default-kp",
         type=float,
         default=20.0,
-        help="Per-joint proportional gain written into the outgoing DDS command.",
+        help="Proportional gain written to all non-target joints to hold posture.",
     )
     parser.add_argument(
-        "--kd",
+        "--default-kd",
         type=float,
         default=1.0,
-        help="Per-joint derivative gain written into the outgoing DDS command.",
+        help="Derivative gain written to all non-target joints to hold posture.",
+    )
+    parser.add_argument(
+        "--target-kp",
+        type=float,
+        default=None,
+        help="Proportional gain written only to the selected target joint. Defaults to --default-kp.",
+    )
+    parser.add_argument(
+        "--target-kd",
+        type=float,
+        default=None,
+        help="Derivative gain written only to the selected target joint. Defaults to --default-kd.",
     )
     parser.add_argument(
         "--rate-hz",
@@ -140,6 +152,8 @@ def main() -> int:
     target_index = DDS_G1_29DOF_JOINT_NAMES.index(args.joint_name)
     target_positions = list(seed.positions[:BODY_JOINT_COUNT])
     target_positions[target_index] += args.offset_rad
+    target_kp = float(args.default_kp if args.target_kp is None else args.target_kp)
+    target_kd = float(args.default_kd if args.target_kd is None else args.target_kd)
 
     publisher = ChannelPublisher(args.lowcmd_topic, LowCmd_)
     publisher.Init()
@@ -157,8 +171,8 @@ def main() -> int:
             motor.q = float(target_positions[index])
             motor.dq = 0.0
             motor.tau = 0.0
-            motor.kp = float(args.kp)
-            motor.kd = float(args.kd)
+            motor.kp = target_kp if index == target_index else float(args.default_kp)
+            motor.kd = target_kd if index == target_index else float(args.default_kd)
         msg.crc = crc.Crc(msg)
         publisher.Write(msg)
         publish_count += 1
@@ -169,6 +183,10 @@ def main() -> int:
         f"for joint `{args.joint_name}` with offset {args.offset_rad:+.4f} rad."
     )
     print(f"Seed position was {seed.positions[target_index]:+.4f} rad; target was {target_positions[target_index]:+.4f} rad.")
+    print(
+        f"Default gains were kp={float(args.default_kp):.4f}, kd={float(args.default_kd):.4f}; "
+        f"target joint gains were kp={target_kp:.4f}, kd={target_kd:.4f}."
+    )
     return 0
 
 

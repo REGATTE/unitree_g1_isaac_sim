@@ -510,3 +510,51 @@
   - dynamic `kp` / `kd` application
   - stricter publish-rate and real-contract validation
   - optional hand DDS topics
+
+## ===================================================================================================================================
+
+## 2026-04-02 Dynamic LowCmd Gain Application
+
+- Created the next DDS follow-up branch:
+  - `feat/dynamic-kp-kd`
+
+- Implemented dynamic simulator-side application of incoming low-level gains.
+  - `src/robot_state.py` now exposes `apply_joint_gains(...)`.
+  - Unitree `kp`/`kd` are mapped directly onto Isaac Sim articulation stiffness/damping.
+  - The primary runtime path uses Isaac Sim `Articulation.set_gains(kps=..., kds=...)`.
+  - A controller-level fallback remains available if a runtime only exposes gain updates through `get_articulation_controller().set_gains(...)`.
+
+- Updated the lowcmd application layer.
+  - `src/robot_control.py` now applies simulator-order `kp`/`kd` on each accepted lowcmd sample.
+  - `LowCmdApplyResult` now reports whether gains were actually applied.
+  - The previous one-time warning about unimplemented gain support is now only emitted if the runtime cannot apply gains.
+
+- Added regression coverage for the gain path.
+  - Extended `tests/test_robot_state_pause_safe.py` to cover articulation-side gain application.
+  - Added `tests/test_robot_control.py` to cover end-to-end lowcmd gain forwarding into the simulator command layer.
+
+- Improved the external DDS validation helper for safer gain testing.
+  - Updated `scripts/send_lowcmd_offset.py` so it no longer forces one `kp`/`kd` value onto the entire body during gain experiments.
+  - Added:
+    - `--default-kp`
+    - `--default-kd`
+    - `--target-kp`
+    - `--target-kd`
+  - This allows the test publisher to keep posture-holding gains on the rest of the body while varying gains only on the selected target joint.
+
+- Validation result from the first live gain experiment.
+  - Sending very low gains across the full body caused the humanoid to collapse.
+  - That behavior is expected and is a useful signal that dynamic gain application is active rather than ignored.
+  - The safer next validation is to vary gains only on a non-load-bearing target joint while holding the rest of the body at stable default gains.
+
+- Verified during this round:
+  - `python3 -m unittest tests/test_g1_lowcmd.py tests/test_robot_state_pause_safe.py tests/test_robot_control.py`
+  - `python3 -m py_compile src/robot_state.py src/robot_control.py tests/test_robot_state_pause_safe.py tests/test_robot_control.py`
+  - `python3 -m py_compile scripts/send_lowcmd_offset.py`
+
+## Resume Here
+
+- Add a named-joint mode to `scripts/lowstate_listener.py` so external DDS validation can compare the target joint's `q`, `dq`, and `tau` directly across low/high gain runs.
+- After that, re-run the external gain comparison using:
+  - stable default gains for the rest of the body
+  - lower and higher gains only on the selected target joint
