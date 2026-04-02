@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LOG_DIR="${REPO_ROOT}/tmp/dds_smoke_logs"
+LOG_DIR="${LOG_DIR:-${REPO_ROOT}/tmp/dds_smoke_logs}"
 SIM_LOG="${LOG_DIR}/sim.log"
 LOWSTATE_LOG="${LOG_DIR}/lowstate_listener.log"
 LOWCMD_LOG="${LOG_DIR}/lowcmd_sender.log"
@@ -104,6 +104,7 @@ log "starting simulator"
     "${HEADLESS_FLAG}" \
     --enable-dds \
     --enable-lowcmd-subscriber \
+    --dds-domain-id "${DDS_DOMAIN_ID}" \
     > "${SIM_LOG}" 2>&1
 ) &
 SIM_PID=$!

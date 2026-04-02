@@ -206,5 +206,9 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-tests/*
 tmp/*
+
+# Keep the repo test suite visible to git even if broader ignore rules are
+# added later during local tooling experiments.
+!tests/
+!tests/**/*.py

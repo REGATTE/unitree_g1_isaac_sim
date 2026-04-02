@@ -885,3 +885,59 @@
   - keep using the smoke-test harness for regression checking after DDS/runtime changes
   - continue using the CSV-capable lowstate listener when comparing gain or joint-response behavior over time
 
+## ===================================================================================================================================
+
+## 2026-04-02 Full Validation Harness
+
+- Created the next validation-focused branch:
+  - `feat/full-validation-harness`
+
+- Added a broader repo-level validation harness:
+  - `scripts/run_full_validation.sh`
+  - This script launches Isaac Sim itself as needed and runs the current
+    repeatable validation phases in sequence:
+    - unit/regression tests
+    - deterministic startup snapshot comparison across two fresh launches
+    - automated DDS smoke test reuse
+    - conservative command-tracking capture with CSV export
+    - stale lowcmd timeout verification
+    - longer bounded cadence run
+
+- Reused and tightened the existing DDS smoke tooling instead of duplicating it.
+  - `scripts/run_dds_smoke_test.sh` now allows its log directory to be overridden
+    so the full-validation harness can nest the smoke phase under its own artifact tree.
+
+- Added validation documentation for operators and future development.
+  - Added `Agents/full_validation.md` as the current checklist for:
+    - what the harness covers automatically
+    - what still requires manual inspection
+    - what still remains outside the harness scope
+  - Updated `README.md` so validation is now documented under one heading:
+    - full validation harness
+    - manual DDS validation flow
+    - automated DDS smoke test
+
+- Hardened git ignore behavior around tests.
+  - Added explicit allow rules so the repo `tests/` tree stays visible to git
+    even if broader ignore rules are added later during local tooling experiments.
+
+- Successful full validation run completed on this branch.
+  - Observed result:
+    - `RESULT: full validation passed.`
+  - The completed harness run passed:
+    - unit/regression tests
+    - deterministic startup snapshot comparison
+    - DDS smoke test
+    - command tracking and stale-timeout checks
+    - longer cadence run
+
+## Next Steps From Here
+
+- If this harness is accepted as the current repo-level validation standard:
+  - merge it to `main`
+  - use `./scripts/run_full_validation.sh` as the preferred pre-merge or pre-release check for DDS/runtime changes
+
+- Remaining validation gaps that are still outside the automated harness:
+  - external Unitree SDK-client compatibility proof
+  - explicit in-session reset semantics
+  - stronger controller-quality evaluation beyond conservative transport/tracking checks
