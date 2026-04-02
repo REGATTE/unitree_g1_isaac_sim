@@ -162,6 +162,7 @@ run_startup_determinism_phase() {
       "${HEADLESS_FLAG}" \
       --enable-dds \
       --enable-lowcmd-subscriber \
+      --dds-domain-id "${DDS_DOMAIN_ID}" \
       --max-frames "${STARTUP_MAX_FRAMES}"
   ) > "${STARTUP_RUN1_LOG}" 2>&1 || fail "startup determinism run 1 failed"
 
@@ -171,6 +172,7 @@ run_startup_determinism_phase() {
       "${HEADLESS_FLAG}" \
       --enable-dds \
       --enable-lowcmd-subscriber \
+      --dds-domain-id "${DDS_DOMAIN_ID}" \
       --max-frames "${STARTUP_MAX_FRAMES}"
   ) > "${STARTUP_RUN2_LOG}" 2>&1 || fail "startup determinism run 2 failed"
 
@@ -208,7 +210,8 @@ run_tracking_phase() {
   start_simulator "${TRACKING_SIM_LOG}" \
     "${HEADLESS_FLAG}" \
     --enable-dds \
-    --enable-lowcmd-subscriber
+    --enable-lowcmd-subscriber \
+    --dds-domain-id "${DDS_DOMAIN_ID}"
   wait_for_dds_startup "${TRACKING_SIM_LOG}" || fail "tracking phase simulator startup failed"
 
   (
@@ -263,6 +266,7 @@ run_long_run_phase() {
       "${HEADLESS_FLAG}" \
       --enable-dds \
       --enable-lowcmd-subscriber \
+      --dds-domain-id "${DDS_DOMAIN_ID}" \
       --max-frames "${LONG_RUN_MAX_FRAMES}" \
       --lowstate-cadence-report-interval "${LONG_RUN_CADENCE_INTERVAL}"
   ) > "${LONG_RUN_LOG}" 2>&1 || fail "long-run cadence phase failed"

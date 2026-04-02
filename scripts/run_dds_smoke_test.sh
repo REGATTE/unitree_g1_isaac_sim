@@ -104,6 +104,7 @@ log "starting simulator"
     "${HEADLESS_FLAG}" \
     --enable-dds \
     --enable-lowcmd-subscriber \
+    --dds-domain-id "${DDS_DOMAIN_ID}" \
     > "${SIM_LOG}" 2>&1
 ) &
 SIM_PID=$!
