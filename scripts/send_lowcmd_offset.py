@@ -22,6 +22,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from mapping.joints import BODY_JOINT_COUNT, DDS_G1_29DOF_JOINT_NAMES
+from tooling import resolve_joint_index
 
 
 @dataclass
@@ -50,16 +51,6 @@ class LowStateSeedListener:
         if not self._event.wait(timeout_seconds):
             return None
         return self._seed
-
-
-def resolve_joint_index(joint_name: str) -> int:
-    try:
-        return DDS_G1_29DOF_JOINT_NAMES.index(joint_name)
-    except ValueError as exc:
-        raise ValueError(
-            f"Unsupported DDS joint name `{joint_name}`. "
-            f"Expected one of: {DDS_G1_29DOF_JOINT_NAMES}"
-        ) from exc
 
 
 def build_parser() -> argparse.ArgumentParser:
