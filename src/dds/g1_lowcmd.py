@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from mapping.joints import BODY_JOINT_COUNT
 from mapping import reorder_dds_values_to_sim
 
 
@@ -52,6 +53,8 @@ class G1LowCmdSubscriber:
         self._latest_command: LowCmdCache | None = None
         self._sdk_enabled = False
         self._warned_unavailable = False
+        self._warned_extra_widths: set[int] = set()
+        self._warned_short_widths: set[int] = set()
 
     @property
     def latest_command(self) -> LowCmdCache | None:
@@ -90,7 +93,14 @@ class G1LowCmdSubscriber:
             return
 
         motor_cmd = msg.motor_cmd
-        count = len(motor_cmd)
+        incoming_count = len(motor_cmd)
+        if incoming_count < BODY_JOINT_COUNT:
+            self._warn_short_message(incoming_count)
+            return
+        if incoming_count > BODY_JOINT_COUNT:
+            self._warn_extra_message_fields(incoming_count)
+
+        count = BODY_JOINT_COUNT
         self._latest_command = LowCmdCache(
             mode_pr=int(msg.mode_pr),
             mode_machine=int(msg.mode_machine),
@@ -100,3 +110,25 @@ class G1LowCmdSubscriber:
             joint_kp_dds=tuple(float(motor_cmd[index].kp) for index in range(count)),
             joint_kd_dds=tuple(float(motor_cmd[index].kd) for index in range(count)),
         )
+
+    def _warn_extra_message_fields(self, incoming_count: int) -> None:
+        """Log once per width when incoming DDS commands expose extra slots."""
+        if incoming_count in self._warned_extra_widths:
+            return
+        print(
+            "[unitree_g1_isaac_sim] received `rt/lowcmd` with "
+            f"{incoming_count} motor slots; consuming only the first {BODY_JOINT_COUNT} "
+            "G1 body-joint commands and ignoring the extra entries."
+        )
+        self._warned_extra_widths.add(incoming_count)
+
+    def _warn_short_message(self, incoming_count: int) -> None:
+        """Log once per width when incoming DDS commands are too short to use."""
+        if incoming_count in self._warned_short_widths:
+            return
+        print(
+            "[unitree_g1_isaac_sim] dropped `rt/lowcmd` message with "
+            f"{incoming_count} motor slots; expected at least {BODY_JOINT_COUNT} "
+            "body-joint commands."
+        )
+        self._warned_short_widths.add(incoming_count)
