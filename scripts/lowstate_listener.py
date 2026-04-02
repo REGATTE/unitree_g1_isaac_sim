@@ -65,14 +65,25 @@ class LowStateListener:
             self._latest = sample
         self._messages_seen += 1
 
-    def print_summary(self, preview_joints: int) -> None:
+    def print_summary(self, preview_joints: int, target_joint_name: str | None = None) -> None:
         sample = self.latest
         if sample is None:
             print("No valid lowstate sample received yet.")
             return
 
         print(f"tick={sample.tick} valid_messages={self._messages_seen} crc_rejected={self._messages_rejected}")
+        target_joint_index = None
+        if target_joint_name is not None:
+            target_joint_index = DDS_G1_29DOF_JOINT_NAMES.index(target_joint_name)
+            print(
+                f"target {target_joint_name}: "
+                f"q={sample.positions[target_joint_index]: .5f} "
+                f"dq={sample.velocities[target_joint_index]: .5f} "
+                f"tau={sample.torques[target_joint_index]: .5f}"
+            )
         for index, joint_name in enumerate(DDS_G1_29DOF_JOINT_NAMES[:preview_joints]):
+            if target_joint_index is not None and index == target_joint_index:
+                continue
             print(
                 f"{index:02d} {joint_name}: "
                 f"q={sample.positions[index]: .5f} "
@@ -100,6 +111,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=8,
         help="How many DDS-ordered joints to print from the latest sample.",
     )
+    parser.add_argument(
+        "--joint-name",
+        type=str,
+        default=None,
+        choices=DDS_G1_29DOF_JOINT_NAMES,
+        help="Optional DDS-order joint to print explicitly, even if it falls outside the preview range.",
+    )
     return parser
 
 
@@ -122,7 +140,10 @@ def main() -> int:
     while time.time() < deadline:
         time.sleep(0.05)
 
-    listener.print_summary(preview_joints=max(args.preview_joints, 0))
+    listener.print_summary(
+        preview_joints=max(args.preview_joints, 0),
+        target_joint_name=args.joint_name,
+    )
     return 0
 
 

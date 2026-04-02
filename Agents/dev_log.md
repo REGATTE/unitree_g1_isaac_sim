@@ -558,3 +558,41 @@
 - After that, re-run the external gain comparison using:
   - stable default gains for the rest of the body
   - lower and higher gains only on the selected target joint
+
+## ===================================================================================================================================
+
+## 2026-04-02 Dynamic Gain Live Validation Follow-Up
+
+- Added a named-joint mode to `scripts/lowstate_listener.py`.
+  - Added `--joint-name` so the listener can print one explicit DDS-order body joint even when it falls outside the default preview range.
+  - This makes the external DDS validation path usable for direct target-joint gain comparison without rewriting the listener output format.
+
+- Re-ran the external DDS gain comparison using the safer single-joint gain-test flow.
+  - Target joint:
+    - `left_shoulder_pitch_joint`
+  - Body posture-holding gains:
+    - `default-kp=40.0`
+    - `default-kd=2.0`
+  - Compared two target-joint gain settings from the same fresh simulator startup state:
+    - low target gains:
+      - `target-kp=5.0`
+      - `target-kd=0.1`
+    - high target gains:
+      - `target-kp=80.0`
+      - `target-kd=3.0`
+
+- Result of the live external DDS validation.
+  - The target joint no longer needs to be inferred from a truncated preview; it is now printed directly from `rt/lowstate`.
+  - With matched startup conditions, the target joint's reflected `q`, `dq`, and `tau` changed materially between the low-gain and high-gain runs.
+  - This is sufficient to treat dynamic `kp` / `kd` application as functioning on the external DDS path.
+  - The remaining limitation is measurement quality, not basic functionality:
+    - current listener output is still a final-sample snapshot, not a time series
+    - whole-body coupling still affects the final posture, so this is a functional validation rather than a controller-tuning benchmark
+
+## Resume Here
+
+- Dynamic `kp` / `kd` control can now be considered working on `feat/dynamic-kp-kd`.
+- The next likely follow-up after this branch is one of:
+  - publish-rate and real-contract validation
+  - optional hand DDS topics
+  - richer lowstate time-series tooling if controller-tuning analysis is needed later
