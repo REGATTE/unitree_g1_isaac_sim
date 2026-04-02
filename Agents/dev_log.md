@@ -658,3 +658,55 @@
   - optional hand DDS topics
   - richer lowstate time-series tooling
   - deterministic startup/reset semantics
+
+## ===================================================================================================================================
+
+## 2026-04-02 Lowstate Time-Series Tooling
+
+- Created the next validation-tooling branch:
+  - `feat/lowstate-timeseries-tooling`
+
+- Extended `scripts/lowstate_listener.py` beyond final-sample summaries.
+  - The listener now stores the lowstate samples received during the capture window instead of keeping only the final sample.
+  - Added target-joint trajectory summary output when `--joint-name` is selected.
+  - Added `--csv-path` support so the listener can export a selected DDS-order body joint as a time series with:
+    - `time_s`
+    - `tick`
+    - `joint_name`
+    - `q`
+    - `dq`
+    - `tau`
+
+- Why this tooling was added.
+  - The core DDS contract is already working:
+    - `rt/lowstate`
+    - `rt/lowcmd`
+    - dynamic `kp` / `kd`
+  - The remaining gap is measurement quality rather than transport correctness.
+  - A single final lowstate sample can show that something moved, but it cannot show:
+    - how fast the joint moved
+    - whether it overshot
+    - whether it oscillated
+    - whether damping is too weak
+    - whether two gain settings produced materially different trajectories
+  - The richer listener makes it possible to validate controller behavior over time using the same external DDS contract instead of relying on simulator-internal tools.
+
+- Added pure-Python regression coverage.
+  - Added `tests/test_lowstate_listener.py`:
+    - target-joint history summary reports extrema and peak values correctly
+    - CSV export writes the expected target-joint rows
+
+- Documentation update.
+  - `README.md` now explicitly explains why time-series lowstate tooling matters for gain validation and future locomotion-controller integration.
+
+- Verified during this round:
+  - `python3 -m unittest tests/test_lowstate_listener.py`
+  - `python3 -m py_compile scripts/lowstate_listener.py tests/test_lowstate_listener.py`
+
+## Resume Here
+
+- Use the CSV-capable lowstate listener to compare low-gain and high-gain target-joint trajectories from matched startup conditions.
+- After that, decide whether the next follow-up should be:
+  - optional hand DDS topics
+  - deterministic startup/reset semantics
+  - richer plotting/post-processing around the CSV output
