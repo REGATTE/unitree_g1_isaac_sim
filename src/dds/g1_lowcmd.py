@@ -10,14 +10,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
-import logging
 import time
 from typing import Any
 
 from mapping.joints import BODY_JOINT_COUNT
 from mapping import reorder_dds_values_to_sim
+from runtime_logging import get_logger
 
-LOGGER = logging.getLogger("unitree_g1_isaac_sim.dds.lowcmd")
+LOGGER = get_logger("dds.lowcmd")
 
 
 @dataclass(frozen=True)
@@ -85,8 +85,8 @@ class G1LowCmdSubscriber:
         except ImportError:
             if not self._warned_unavailable:
                 LOGGER.warning(
-                    "[unitree_g1_isaac_sim] DDS lowcmd subscriber requested but "
-                    "`unitree_sdk2py` is not installed. Skipping subscription."
+                    "DDS lowcmd subscriber requested but `unitree_sdk2py` is not installed. "
+                    "Skipping subscription."
                 )
                 self._warned_unavailable = True
             return False
@@ -95,7 +95,7 @@ class G1LowCmdSubscriber:
         self._subscriber = ChannelSubscriber(self._topic_name, LowCmd_)
         self._subscriber.Init(self._on_message, 32)
         self._sdk_enabled = True
-        LOGGER.info("[unitree_g1_isaac_sim] DDS lowcmd subscriber ready on %s", self._topic_name)
+        LOGGER.info("DDS lowcmd subscriber ready on %s", self._topic_name)
         return True
 
     def _on_message(self, msg: Any) -> None:
@@ -103,7 +103,7 @@ class G1LowCmdSubscriber:
         if self._crc_helper is None:
             return
         if self._crc_helper.Crc(msg) != msg.crc:
-            LOGGER.warning("[unitree_g1_isaac_sim] dropped `rt/lowcmd` message with invalid CRC")
+            LOGGER.warning("dropped `rt/lowcmd` message with invalid CRC")
             return
 
         motor_cmd = msg.motor_cmd
@@ -135,7 +135,7 @@ class G1LowCmdSubscriber:
     def _warn_extra_message_fields(incoming_count: int) -> None:
         """Log once per width when incoming DDS commands expose extra slots."""
         LOGGER.warning(
-            "[unitree_g1_isaac_sim] received `rt/lowcmd` with %s motor slots; "
+            "received `rt/lowcmd` with %s motor slots; "
             "consuming only the first %s G1 body-joint commands and ignoring the extra entries.",
             incoming_count,
             BODY_JOINT_COUNT,
@@ -146,7 +146,7 @@ class G1LowCmdSubscriber:
     def _warn_short_message(incoming_count: int) -> None:
         """Log once per width when incoming DDS commands are too short to use."""
         LOGGER.warning(
-            "[unitree_g1_isaac_sim] dropped `rt/lowcmd` message with %s motor slots; "
+            "dropped `rt/lowcmd` message with %s motor slots; "
             "expected at least %s body-joint commands.",
             incoming_count,
             BODY_JOINT_COUNT,

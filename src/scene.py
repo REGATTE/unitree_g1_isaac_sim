@@ -5,6 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from config import AppConfig
+from runtime_logging import get_logger
+
+
+LOGGER = get_logger("scene")
 
 
 def import_stage_helpers():
@@ -35,7 +39,7 @@ def build_scene(asset_path: Path, config: AppConfig) -> None:
     import omni.usd
     from pxr import Gf, UsdGeom, UsdLux, UsdPhysics
 
-    print("[unitree_g1_isaac_sim] creating stage")
+    LOGGER.info("creating stage")
     add_reference_to_stage = import_stage_helpers()
     GroundPlane = import_ground_plane()
     PhysicsContext = import_physics_context()
@@ -44,7 +48,7 @@ def build_scene(asset_path: Path, config: AppConfig) -> None:
     usd_context.new_stage()
     stage = usd_context.get_stage()
 
-    print("[unitree_g1_isaac_sim] configuring world prim")
+    LOGGER.info("configuring world prim")
     UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
     UsdGeom.SetStageMetersPerUnit(stage, 1.0)
 
@@ -55,17 +59,17 @@ def build_scene(asset_path: Path, config: AppConfig) -> None:
     physics_scene.CreateGravityDirectionAttr().Set(Gf.Vec3f(0.0, 0.0, -1.0))
     physics_scene.CreateGravityMagnitudeAttr().Set(9.81)
 
-    print("[unitree_g1_isaac_sim] creating physics context")
+    LOGGER.info("creating physics context")
     PhysicsContext(physics_dt=config.physics_dt, prim_path="/World/PhysicsScene")
-    print("[unitree_g1_isaac_sim] creating ground plane")
+    LOGGER.info("creating ground plane")
     GroundPlane(prim_path="/World/GroundPlane", z_position=0.0)
 
-    print("[unitree_g1_isaac_sim] creating light")
+    LOGGER.info("creating light")
     light = UsdLux.DistantLight.Define(stage, "/World/DistantLight")
     light.CreateIntensityAttr(500.0)
     light.AddRotateXYZOp().Set(Gf.Vec3f(45.0, 0.0, 0.0))
 
-    print("[unitree_g1_isaac_sim] referencing robot asset")
+    LOGGER.info("referencing robot asset")
     add_reference_to_stage(str(asset_path), config.robot_prim_path)
     robot_xform = UsdGeom.Xformable(stage.GetPrimAtPath(config.robot_prim_path))
     translate_op = None
@@ -76,4 +80,4 @@ def build_scene(asset_path: Path, config: AppConfig) -> None:
     if translate_op is None:
         translate_op = robot_xform.AddTranslateOp(precision=UsdGeom.XformOp.PrecisionDouble)
     translate_op.Set(Gf.Vec3d(0.0, 0.0, config.robot_height))
-    print("[unitree_g1_isaac_sim] stage setup complete")
+    LOGGER.info("stage setup complete")

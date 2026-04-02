@@ -16,6 +16,10 @@ from dataclasses import dataclass
 
 from dds.g1_lowcmd import LowCmdCache
 from robot_state import PhysicsViewUnavailableError, RobotStateReader
+from runtime_logging import get_logger
+
+
+LOGGER = get_logger("robot_control")
 
 
 @dataclass(frozen=True)
@@ -94,8 +98,8 @@ class RobotCommandApplier:
         if self._warned_about_gains:
             return
         if any(value != 0.0 for value in lowcmd.joint_kp_dds) or any(value != 0.0 for value in lowcmd.joint_kd_dds):
-            print(
-                "[unitree_g1_isaac_sim] received lowcmd gains (`kp`/`kd`), but dynamic gain "
-                "application is not implemented yet; applying position/velocity/effort fields only."
+            LOGGER.warning(
+                "received lowcmd gains (`kp`/`kd`), but dynamic gain application is not "
+                "implemented yet; applying position/velocity/effort fields only."
             )
             self._warned_about_gains = True

@@ -8,8 +8,7 @@ validates that robot state can be read, and then owns the main loop.
 
 from __future__ import annotations
 
-import sys
-import traceback
+import logging
 
 from config import PROJECT_ROOT, AppConfig, parse_config
 from dds import DdsManager
@@ -22,7 +21,10 @@ from robot_state import (
     log_joint_state,
     log_kinematic_snapshot,
 )
+from runtime_logging import configure_logging, get_logger
 from scene import build_scene
+
+LOGGER = get_logger("main")
 
 
 def load_simulation_app(config: AppConfig):
@@ -46,9 +48,9 @@ def create_world(config: AppConfig):
     except ImportError:
         from omni.isaac.core import World
 
-    print("[unitree_g1_isaac_sim] creating simulation world")
+    LOGGER.info("creating simulation world")
     world = World(stage_units_in_meters=1.0, physics_dt=config.physics_dt)
-    print("[unitree_g1_isaac_sim] resetting simulation world")
+    LOGGER.info("resetting simulation world")
     world.reset()
     return world
 
@@ -124,17 +126,18 @@ def initialize_robot_state_reader(config: AppConfig) -> RobotStateReader:
 
 def main() -> int:
     config = parse_config()
+    configure_logging(level=logging.INFO)
 
     try:
         asset_path = config.resolve_asset_path()
     except FileNotFoundError as exc:
-        print(exc, file=sys.stderr)
+        LOGGER.error("%s", exc)
         return 1
 
     simulation_app = load_simulation_app(config)
     try:
-        print(f"[unitree_g1_isaac_sim] project_root={PROJECT_ROOT}")
-        print(f"[unitree_g1_isaac_sim] asset_path={asset_path}")
+        LOGGER.info("project_root=%s", PROJECT_ROOT)
+        LOGGER.info("asset_path=%s", asset_path)
         build_scene(asset_path, config)
         world = create_world(config)
         state_reader = initialize_robot_state_reader(config)
@@ -153,8 +156,7 @@ def main() -> int:
             command_applier,
         )
     except Exception:
-        print("[unitree_g1_isaac_sim] fatal error during startup/runtime", file=sys.stderr)
-        traceback.print_exc()
+        LOGGER.exception("fatal error during startup/runtime")
         return 1
     finally:
         if "dds_manager" in locals() and dds_manager is not None:
