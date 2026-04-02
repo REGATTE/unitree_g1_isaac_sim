@@ -710,3 +710,31 @@
   - optional hand DDS topics
   - deterministic startup/reset semantics
   - richer plotting/post-processing around the CSV output
+
+## ===================================================================================================================================
+
+## 2026-04-02 Lowstate Listener Review Follow-Up
+
+- Addressed the code-review follow-up on `scripts/lowstate_listener.py`.
+  - The listener history is now bounded instead of growing without limit during long runs.
+  - Added a configurable `max_history_samples` cap at the listener boundary.
+
+- Tightened target-joint history summarization and CSV export.
+  - Added explicit joint-name validation through a shared resolver instead of repeatedly calling
+    `DDS_G1_29DOF_JOINT_NAMES.index(...)` at each helper call site.
+  - `summarize_joint_history(...)` now computes:
+    - `sample_count`
+    - `duration_seconds`
+    from the filtered valid target-joint subset rather than from the raw history list.
+  - `write_joint_history_csv(...)` now exports only samples that actually contain the requested
+    target joint across position, velocity, and torque fields.
+  - The CLI path now resolves the target joint index once and reuses it across summary and CSV paths.
+
+- Extended regression coverage for the review fixes.
+  - Updated `tests/test_lowstate_listener.py` to cover:
+    - filtered sample-count and duration behavior when invalid samples are present
+    - CSV export skipping samples that do not contain the requested target joint
+
+- Verified during this round:
+  - `python3 -m unittest tests/test_lowstate_listener.py`
+  - `python3 -m py_compile scripts/lowstate_listener.py tests/test_lowstate_listener.py`

@@ -33,10 +33,11 @@ class LowStateSample:
 
 
 class LowStateListener:
-    def __init__(self, topic_name: str) -> None:
+    def __init__(self, topic_name: str, max_history_samples: int = 5000) -> None:
         from unitree_sdk2py.utils.crc import CRC
 
         self._topic_name = topic_name
+        self._max_history_samples = max(max_history_samples, 1)
         self._crc = CRC()
         self._latest: LowStateSample | None = None
         self._history: list[LowStateSample] = []
@@ -73,6 +74,9 @@ class LowStateListener:
         with self._lock:
             self._latest = sample
             self._history.append(sample)
+            overflow = len(self._history) - self._max_history_samples
+            if overflow > 0:
+                del self._history[:overflow]
         self._messages_seen += 1
 
     def print_summary(self, preview_joints: int, target_joint_name: str | None = None) -> None:
@@ -84,7 +88,7 @@ class LowStateListener:
         print(f"tick={sample.tick} valid_messages={self._messages_seen} crc_rejected={self._messages_rejected}")
         target_joint_index = None
         if target_joint_name is not None:
-            target_joint_index = DDS_G1_29DOF_JOINT_NAMES.index(target_joint_name)
+            target_joint_index = resolve_joint_index(target_joint_name)
             print(
                 f"target {target_joint_name}: "
                 f"q={sample.positions[target_joint_index]: .5f} "
@@ -104,7 +108,11 @@ class LowStateListener:
         print(f"imu_accelerometer={_format_vector(sample.imu_accelerometer)}")
         print(f"imu_gyroscope={_format_vector(sample.imu_gyroscope)}")
         if target_joint_name is not None:
-            target_stats = summarize_joint_history(self.history, target_joint_name)
+            target_stats = summarize_joint_history(
+                self.history,
+                target_joint_name,
+                joint_index=target_joint_index,
+            )
             if target_stats is not None:
                 print(
                     f"target_history {target_joint_name}: "
@@ -127,19 +135,46 @@ class JointHistorySummary:
     torque_peak_abs: float
 
 
-def summarize_joint_history(history: list[LowStateSample], joint_name: str) -> JointHistorySummary | None:
+def resolve_joint_index(joint_name: str) -> int:
+    try:
+        return DDS_G1_29DOF_JOINT_NAMES.index(joint_name)
+    except ValueError as exc:
+        raise ValueError(
+            f"Unsupported DDS joint name `{joint_name}`. "
+            f"Expected one of: {DDS_G1_29DOF_JOINT_NAMES}"
+        ) from exc
+
+
+def _filter_joint_history_samples(history: list[LowStateSample], joint_index: int) -> list[LowStateSample]:
+    return [
+        sample
+        for sample in history
+        if joint_index < len(sample.positions)
+        and joint_index < len(sample.velocities)
+        and joint_index < len(sample.torques)
+    ]
+
+
+def summarize_joint_history(
+    history: list[LowStateSample],
+    joint_name: str,
+    *,
+    joint_index: int | None = None,
+) -> JointHistorySummary | None:
     if not history:
         return None
-    joint_index = DDS_G1_29DOF_JOINT_NAMES.index(joint_name)
-    start_time = history[0].received_at_monotonic
-    end_time = history[-1].received_at_monotonic
-    positions = [sample.positions[joint_index] for sample in history if joint_index < len(sample.positions)]
-    velocities = [sample.velocities[joint_index] for sample in history if joint_index < len(sample.velocities)]
-    torques = [sample.torques[joint_index] for sample in history if joint_index < len(sample.torques)]
-    if not positions or not velocities or not torques:
+    if joint_index is None:
+        joint_index = resolve_joint_index(joint_name)
+    filtered_history = _filter_joint_history_samples(history, joint_index)
+    if not filtered_history:
         return None
+    start_time = filtered_history[0].received_at_monotonic
+    end_time = filtered_history[-1].received_at_monotonic
+    positions = [sample.positions[joint_index] for sample in filtered_history]
+    velocities = [sample.velocities[joint_index] for sample in filtered_history]
+    torques = [sample.torques[joint_index] for sample in filtered_history]
     return JointHistorySummary(
-        sample_count=len(history),
+        sample_count=len(filtered_history),
         duration_seconds=max(end_time - start_time, 0.0),
         position_min=min(positions),
         position_max=max(positions),
@@ -148,16 +183,22 @@ def summarize_joint_history(history: list[LowStateSample], joint_name: str) -> J
     )
 
 
-def write_joint_history_csv(history: list[LowStateSample], joint_name: str, output_path: Path) -> None:
-    joint_index = DDS_G1_29DOF_JOINT_NAMES.index(joint_name)
+def write_joint_history_csv(
+    history: list[LowStateSample],
+    joint_name: str,
+    output_path: Path,
+    *,
+    joint_index: int | None = None,
+) -> None:
+    if joint_index is None:
+        joint_index = resolve_joint_index(joint_name)
+    filtered_history = _filter_joint_history_samples(history, joint_index)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    start_time = history[0].received_at_monotonic if history else 0.0
+    start_time = filtered_history[0].received_at_monotonic if filtered_history else 0.0
     with output_path.open("w", newline="") as csv_file:
         writer = csv.writer(csv_file)
         writer.writerow(["time_s", "tick", "joint_name", "q", "dq", "tau"])
-        for sample in history:
-            if joint_index >= len(sample.positions) or joint_index >= len(sample.velocities) or joint_index >= len(sample.torques):
-                continue
+        for sample in filtered_history:
             writer.writerow(
                 [
                     f"{sample.received_at_monotonic - start_time:.6f}",
@@ -212,6 +253,7 @@ def main() -> int:
         print(f"Failed to import unitree_sdk2py: {exc}", file=sys.stderr)
         return 1
 
+    target_joint_index = resolve_joint_index(args.joint_name) if args.joint_name is not None else None
     listener = LowStateListener(topic_name=args.topic)
     ChannelFactoryInitialize(args.dds_domain_id)
     subscriber = ChannelSubscriber(args.topic, LowState_)
@@ -229,8 +271,14 @@ def main() -> int:
         if not history:
             print("No valid lowstate sample received yet.", file=sys.stderr)
             return 1
-        write_joint_history_csv(history, args.joint_name, args.csv_path)
-        print(f"Wrote {len(history)} lowstate samples for `{args.joint_name}` to {args.csv_path}")
+        write_joint_history_csv(
+            history,
+            args.joint_name,
+            args.csv_path,
+            joint_index=target_joint_index,
+        )
+        exported_history = _filter_joint_history_samples(history, target_joint_index)
+        print(f"Wrote {len(exported_history)} lowstate samples for `{args.joint_name}` to {args.csv_path}")
 
     listener.print_summary(
         preview_joints=max(args.preview_joints, 0),
