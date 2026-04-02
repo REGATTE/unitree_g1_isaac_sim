@@ -74,6 +74,10 @@ class G1LowCmdSubscriber:
     def latest_command(self) -> LowCmdCache | None:
         return self._latest_command
 
+    def clear_cached_command(self) -> None:
+        """Discard any previously received lowcmd sample."""
+        self._latest_command = None
+
     def initialize(self) -> bool:
         """Create the Unitree subscriber if the SDK is installed."""
         if self._sdk_enabled:

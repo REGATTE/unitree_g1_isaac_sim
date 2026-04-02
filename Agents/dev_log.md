@@ -824,3 +824,179 @@
 - Verified during this round:
   - `python3 -m unittest tests/test_lowstate_listener.py`
   - `python3 -m py_compile scripts/lowstate_listener.py tests/test_lowstate_listener.py`
+
+
+## ===================================================================================================================================
+
+## 2026-04-02 Current Main Branch State
+
+- Re-read `Agents/implementation_plan.md` against the current `main` branch head.
+
+- `main` now includes the baseline DDS simulator work plus the later operational-polish follow-ups.
+  - Landed baseline/body DDS surface on `main`:
+    - Isaac Sim bootstrap and G1 scene/runtime setup
+    - validated 29-DoF simulator-order <-> DDS-order body mapping
+    - `rt/lowstate` publication
+    - `rt/lowcmd` subscription and simulator command application
+    - dynamic `kp` / `kd`
+    - stale-command handling
+    - non-reanchoring lowstate publish scheduling
+    - cadence diagnostics
+    - pause-safe articulation/runtime behavior
+    - richer lowstate listener tooling with CSV export
+    - tightened CLI/config validation on key rate/dt arguments
+
+- `main` also now includes the newer runtime/logging and smoke-test work.
+  - Added repo-level runtime logging:
+    - shared logging setup in `src/runtime_logging.py`
+    - core runtime modules under `src/` now emit named logger output instead of mixed `print(...)`
+    - lowcmd startup visibility now uses the same runtime logging path as the rest of DDS startup
+  - Added automated DDS smoke validation:
+    - `scripts/run_dds_smoke_test.sh`
+    - end-to-end readiness checks for:
+      - DDS channel factory startup
+      - lowstate publisher readiness
+      - lowcmd subscriber readiness
+      - external lowstate reception
+      - external lowcmd publication / reception
+      - zero CRC rejection in the listener path
+    - explicit final verdict:
+      - `RESULT: DDS communication working end-to-end.`
+
+- Current practical status of the repo.
+  - The implementation plan still matches the codebase well:
+    - thin `main.py`
+    - explicit scene/runtime separation
+    - explicit mapping layer
+    - robot-state / robot-control ownership split
+    - single-process DDS bridge model
+  - The project is now beyond “DDS bring-up only” and has a usable operator-facing validation path built into the repo.
+  - The automated smoke test has already been run successfully against the current runtime and produced a passing end-to-end DDS result.
+
+## Next Steps From Current `main`
+
+- Closest likely project-level next steps:
+  - document or tag a clearer baseline/pre-release from `main`
+  - add optional hand DDS topics (`dex1`, `dex3`, `inspire`)
+  - implement deterministic startup/reset semantics
+  - add stronger controller-quality validation beyond transport-level DDS smoke tests
+
+- Short-term validation direction:
+  - keep using the smoke-test harness for regression checking after DDS/runtime changes
+  - continue using the CSV-capable lowstate listener when comparing gain or joint-response behavior over time
+
+## ===================================================================================================================================
+
+## 2026-04-02 Full Validation Harness
+
+- Created the next validation-focused branch:
+  - `feat/full-validation-harness`
+
+- Added a broader repo-level validation harness:
+  - `scripts/run_full_validation.sh`
+  - This script launches Isaac Sim itself as needed and runs the current
+    repeatable validation phases in sequence:
+    - unit/regression tests
+    - deterministic startup snapshot comparison across two fresh launches
+    - automated DDS smoke test reuse
+    - conservative command-tracking capture with CSV export
+    - stale lowcmd timeout verification
+    - longer bounded cadence run
+
+- Reused and tightened the existing DDS smoke tooling instead of duplicating it.
+  - `scripts/run_dds_smoke_test.sh` now allows its log directory to be overridden
+    so the full-validation harness can nest the smoke phase under its own artifact tree.
+
+- Added validation documentation for operators and future development.
+  - Added `Agents/full_validation.md` as the current checklist for:
+    - what the harness covers automatically
+    - what still requires manual inspection
+    - what still remains outside the harness scope
+  - Updated `README.md` so validation is now documented under one heading:
+    - full validation harness
+    - manual DDS validation flow
+    - automated DDS smoke test
+
+- Hardened git ignore behavior around tests.
+  - Added explicit allow rules so the repo `tests/` tree stays visible to git
+    even if broader ignore rules are added later during local tooling experiments.
+
+- Successful full validation run completed on this branch.
+  - Observed result:
+    - `RESULT: full validation passed.`
+  - The completed harness run passed:
+    - unit/regression tests
+    - deterministic startup snapshot comparison
+    - DDS smoke test
+    - command tracking and stale-timeout checks
+    - longer cadence run
+
+## Next Steps From Here
+
+- If this harness is accepted as the current repo-level validation standard:
+  - merge it to `main`
+  - use `./scripts/run_full_validation.sh` as the preferred pre-merge or pre-release check for DDS/runtime changes
+
+- Remaining validation gaps that are still outside the automated harness:
+  - external Unitree SDK-client compatibility proof
+  - stronger controller-quality evaluation beyond conservative transport/tracking checks
+
+## ===================================================================================================================================
+
+## 2026-04-02 Deterministic Reset Semantics Completed
+
+- Returned to `feat/deterministic-startup-reset` after the validation-harness merge and closed the remaining branch gap:
+  - deterministic startup was already implemented
+  - deterministic in-session reset semantics were still missing
+
+- Added a real in-session reset path to the runtime.
+  - `src/config.py`
+    - added `--reset-after-frames` as a one-shot validation trigger for runtime reset
+  - `src/main.py`
+    - added a dedicated runtime reset path that:
+      - calls `world.reset()`
+      - reinitializes the articulation wrapper
+      - reapplies the canonical deterministic reset state
+      - clears DDS runtime state
+  - `src/robot_state.py`
+    - generalized the startup helper into reusable deterministic reset state application
+    - added articulation rebind support after world reset
+  - `src/dds/g1_lowcmd.py`
+    - added lowcmd cache clearing support
+  - `src/dds/manager.py`
+    - added DDS runtime reset-state clearing for:
+      - cached lowcmd state
+      - stale-command warning latch
+      - cadence tracker window
+      - next lowstate publish target
+
+- Extended tests for reset semantics.
+  - `tests/test_robot_state_pause_safe.py`
+    - covers articulation rebind behavior after reset
+    - covers deterministic reset-state application on the articulation wrapper
+  - `tests/test_dds_manager.py`
+    - covers DDS runtime state clearing on reset
+
+- Extended the full validation harness to cover reset explicitly.
+  - `scripts/run_full_validation.sh` now includes:
+    - an in-session reset validation phase
+  - `Agents/full_validation.md` and `README.md` now reflect that reset validation is part of the harness instead of future work.
+
+- Live validation status.
+  - Manual reset-only validation succeeded with the expected runtime markers:
+    - deterministic reset state applied at startup
+    - runtime reset triggered
+    - deterministic reset state reapplied after reset
+    - DDS runtime state cleared
+    - reset completion logged
+  - Full validation subsequently passed end-to-end on this branch with:
+    - `RESULT: full validation passed.`
+
+## Next Steps From Here
+
+- This branch now covers the intended startup/reset scope and is ready for merge review.
+
+- The remaining larger-scope items are outside this branch’s core purpose:
+  - external Unitree SDK-client compatibility proof
+  - optional hand DDS topics (`dex1`, `dex3`, `inspire`)
+  - stronger controller-quality evaluation beyond the current conservative validation harness
