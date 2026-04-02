@@ -510,3 +510,89 @@
   - dynamic `kp` / `kd` application
   - stricter publish-rate and real-contract validation
   - optional hand DDS topics
+
+## ===================================================================================================================================
+
+## 2026-04-02 Dynamic LowCmd Gain Application
+
+- Created the next DDS follow-up branch:
+  - `feat/dynamic-kp-kd`
+
+- Implemented dynamic simulator-side application of incoming low-level gains.
+  - `src/robot_state.py` now exposes `apply_joint_gains(...)`.
+  - Unitree `kp`/`kd` are mapped directly onto Isaac Sim articulation stiffness/damping.
+  - The primary runtime path uses Isaac Sim `Articulation.set_gains(kps=..., kds=...)`.
+  - A controller-level fallback remains available if a runtime only exposes gain updates through `get_articulation_controller().set_gains(...)`.
+
+- Updated the lowcmd application layer.
+  - `src/robot_control.py` now applies simulator-order `kp`/`kd` on each accepted lowcmd sample.
+  - `LowCmdApplyResult` now reports whether gains were actually applied.
+  - The previous one-time warning about unimplemented gain support is now only emitted if the runtime cannot apply gains.
+
+- Added regression coverage for the gain path.
+  - Extended `tests/test_robot_state_pause_safe.py` to cover articulation-side gain application.
+  - Added `tests/test_robot_control.py` to cover end-to-end lowcmd gain forwarding into the simulator command layer.
+
+- Improved the external DDS validation helper for safer gain testing.
+  - Updated `scripts/send_lowcmd_offset.py` so it no longer forces one `kp`/`kd` value onto the entire body during gain experiments.
+  - Added:
+    - `--default-kp`
+    - `--default-kd`
+    - `--target-kp`
+    - `--target-kd`
+  - This allows the test publisher to keep posture-holding gains on the rest of the body while varying gains only on the selected target joint.
+
+- Validation result from the first live gain experiment.
+  - Sending very low gains across the full body caused the humanoid to collapse.
+  - That behavior is expected and is a useful signal that dynamic gain application is active rather than ignored.
+  - The safer next validation is to vary gains only on a non-load-bearing target joint while holding the rest of the body at stable default gains.
+
+- Verified during this round:
+  - `python3 -m unittest tests/test_g1_lowcmd.py tests/test_robot_state_pause_safe.py tests/test_robot_control.py`
+  - `python3 -m py_compile src/robot_state.py src/robot_control.py tests/test_robot_state_pause_safe.py tests/test_robot_control.py`
+  - `python3 -m py_compile scripts/send_lowcmd_offset.py`
+
+## Resume Here
+
+- Add a named-joint mode to `scripts/lowstate_listener.py` so external DDS validation can compare the target joint's `q`, `dq`, and `tau` directly across low/high gain runs.
+- After that, re-run the external gain comparison using:
+  - stable default gains for the rest of the body
+  - lower and higher gains only on the selected target joint
+
+## ===================================================================================================================================
+
+## 2026-04-02 Dynamic Gain Live Validation Follow-Up
+
+- Added a named-joint mode to `scripts/lowstate_listener.py`.
+  - Added `--joint-name` so the listener can print one explicit DDS-order body joint even when it falls outside the default preview range.
+  - This makes the external DDS validation path usable for direct target-joint gain comparison without rewriting the listener output format.
+
+- Re-ran the external DDS gain comparison using the safer single-joint gain-test flow.
+  - Target joint:
+    - `left_shoulder_pitch_joint`
+  - Body posture-holding gains:
+    - `default-kp=40.0`
+    - `default-kd=2.0`
+  - Compared two target-joint gain settings from the same fresh simulator startup state:
+    - low target gains:
+      - `target-kp=5.0`
+      - `target-kd=0.1`
+    - high target gains:
+      - `target-kp=80.0`
+      - `target-kd=3.0`
+
+- Result of the live external DDS validation.
+  - The target joint no longer needs to be inferred from a truncated preview; it is now printed directly from `rt/lowstate`.
+  - With matched startup conditions, the target joint's reflected `q`, `dq`, and `tau` changed materially between the low-gain and high-gain runs.
+  - This is sufficient to treat dynamic `kp` / `kd` application as functioning on the external DDS path.
+  - The remaining limitation is measurement quality, not basic functionality:
+    - current listener output is still a final-sample snapshot, not a time series
+    - whole-body coupling still affects the final posture, so this is a functional validation rather than a controller-tuning benchmark
+
+## Resume Here
+
+- Dynamic `kp` / `kd` control can now be considered working on `feat/dynamic-kp-kd`.
+- The next likely follow-up after this branch is one of:
+  - publish-rate and real-contract validation
+  - optional hand DDS topics
+  - richer lowstate time-series tooling if controller-tuning analysis is needed later
