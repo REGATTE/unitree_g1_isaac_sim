@@ -3,6 +3,32 @@ A unitree G1 based simulation, to mimic the Cyclone DDS layer, on IsaacSim.
 
 ## Setup
 
+### Install Cyclone DDS
+
+```bash
+# Home Folder
+git clone https://github.com/eclipse-cyclonedds/cyclonedds -b releases/0.10.x
+mkdir -p build install
+cd build
+cmake .. -DCMAKE_INSTALL_PREFIX=../install
+cmake --build . --target install
+cd ..
+
+echo 'export CYCLONEDDS_HOME=$HOME/cyclonedds/install' >> ~/.bashrc
+echo 'export CMAKE_PREFIX_PATH=$CYCLONEDDS_HOME:$CMAKE_PREFIX_PATH' >> ~/.bashrc
+
+source ~/.bashrccd
+```
+
+### Install Unitree_sdk2_python
+
+```bash
+# Home FOlder
+git clone https://github.com/unitreerobotics/unitree_sdk2_python.git
+cd unitree_sdk2_python
+pip3 install -e .
+```
+
 ### Setup Isaac Sim Paths
 
 ```bash

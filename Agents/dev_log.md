@@ -250,3 +250,117 @@
   - map them from DDS order back into simulator order
   - apply them into Isaac Sim articulation control
 - After body lowcmd works, decide whether optional dex1/dex3/inspire DDS bridges are needed for the intended G1 configuration.
+
+## ===================================================================================================================================
+
+## 2026-04-01 DDS LowCmd Minimum Viable Update
+
+- Implemented the minimum viable `rt/lowcmd` body-command path on `dds_dev`.
+- Added `src/robot_control.py`.
+  - Introduced `RobotCommandApplier` as the simulator-side owner of cached body commands.
+  - This module now takes the latest validated DDS command, remaps it from DDS order back into simulator order, and applies it to the articulation.
+
+- Extended `src/robot_state.py` beyond read-only use.
+  - Added articulation write helpers for:
+    - joint position targets
+    - joint velocity targets
+    - joint efforts
+  - Kept command-width validation local to the articulation wrapper so bad lowcmd widths fail early.
+
+- Updated `src/main.py` to wire lowcmd application into the runtime loop.
+  - The latest cached `rt/lowcmd` sample is now applied before each physics step.
+  - DDS initialization is performed eagerly when DDS is enabled, so both sides of the body DDS contract are brought up at startup.
+
+- Current behavior of the minimum viable lowcmd path:
+  - `rt/lowstate` publish is still active
+  - `rt/lowcmd` subscribe is now active and applied to the live articulation
+  - the current control slice should be treated primarily as a position-command path
+  - velocity and effort fields are forwarded when matching articulation APIs are exposed by the runtime
+  - `kp` and `kd` are preserved from DDS but are not dynamically applied yet
+
+- Added DDS testing documentation.
+  - Added `dds_testing.md` at the repo root.
+  - Documented:
+    - how to launch the simulator with DDS enabled
+    - how to test `rt/lowstate`
+    - how to test `rt/lowcmd`
+    - a safe first validation sequence
+    - current limitations and safety notes
+
+- Verified during this round:
+  - `python3 -m py_compile src/main.py src/robot_state.py src/robot_control.py src/dds/g1_lowcmd.py src/dds/g1_lowstate.py src/dds/manager.py`
+
+- Git state for this round:
+  - created commit:
+    - `6d86110` `min viable lowcmd`
+  - pushed branch:
+    - `origin/dds_dev`
+
+## Resume Here
+
+- Run the documented DDS bring-up sequence in `dds_testing.md`.
+- Verify that:
+  - `rt/lowstate` is visible to an external Unitree client
+  - `rt/lowcmd` produces visible joint motion in Isaac Sim
+  - the commanded motion is reflected back on `rt/lowstate`
+- After that, decide whether to:
+  - implement dynamic `kp` / `kd` application
+  - add optional hand DDS topics (`dex1`, `dex3`, `inspire`)
+  - add utility DDS topics such as reset or simulator state
+
+## ===================================================================================================================================
+
+## 2026-04-01 External DDS Validation and LowCmd Width Failure
+
+- Validated the first external DDS path against standalone `unitree_sdk2py` scripts.
+  - Installed CycloneDDS locally and exported `CYCLONEDDS_HOME`.
+  - Installed `unitree_sdk2py` into Isaac Sim's Python so the in-process DDS bridge could start.
+  - Launched Isaac Sim with:
+    - `--enable-dds`
+    - `--enable-lowcmd-subscriber`
+  - Confirmed runtime DDS bring-up:
+    - Unitree DDS channel factory initialized on domain `1`
+    - `rt/lowstate` publisher ready
+    - `rt/lowcmd` subscriber ready
+
+- Added standalone DDS validation scripts at the repo root under `scripts/`.
+  - `scripts/lowstate_listener.py`
+    - passive external `rt/lowstate` subscriber
+    - verifies CRC and prints DDS-ordered joint and IMU previews
+  - `scripts/send_lowcmd_offset.py`
+    - waits for one valid `rt/lowstate` sample
+    - reuses the current pose as a hold posture
+    - applies a small offset on one selected DDS body joint
+
+- Confirmed the first external `rt/lowstate` success case.
+  - A standalone SDK listener received a continuous stream of lowstate samples from outside the Isaac Sim process.
+  - CRC validation passed on the external receive path.
+  - Joint positions, velocities, torques, and IMU fields were populated and physically reasonable.
+  - This validates the direct Isaac Sim DDS architecture for the outgoing state path without the Isaac Lab shared-memory intermediary.
+
+- Confirmed the first external `rt/lowcmd` failure mode.
+  - A standalone SDK publisher successfully reached the simulator on `rt/lowcmd`.
+  - The simulator crashed while converting the cached DDS command back into simulator order.
+  - The runtime failure was:
+    - `ValueError: Expected 29 dds-ordered values, got 35`
+
+- Root cause identified from the live crash.
+  - The current lowcmd subscriber caches `len(msg.motor_cmd)` entries from the incoming Unitree `LowCmd_`.
+  - The external message shape exposed `35` motor-command slots.
+  - The current G1 body mapping layer in this repo correctly expects exactly `29` body joints.
+  - The remaining bug is therefore DDS-boundary width handling, not CycloneDDS setup, SDK import, topic wiring, or CRC validation.
+
+- Documentation updated during this round.
+  - Added DDS test instructions in `dds_testing.md`.
+  - Added the standalone validation scripts used for external bring-up.
+  - Continued README updates around setup and DDS testing flow.
+
+## Resume Here
+
+- Fix `src/dds/g1_lowcmd.py` so the subscriber does not trust the full incoming `motor_cmd` width.
+- Explicitly consume only the 29 supported G1 body-joint command slots.
+- Ignore or reject the extra incoming slots without crashing the simulator.
+- Re-run the standalone `unitree_sdk2py` lowcmd test after the fix and confirm:
+  - the simulator stays alive
+  - the commanded body joint moves
+  - the motion is reflected back on `rt/lowstate`
