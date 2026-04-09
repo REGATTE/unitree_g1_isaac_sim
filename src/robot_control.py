@@ -43,10 +43,11 @@ class RobotCommandApplier:
     def apply_lowcmd(self, lowcmd: LowCmdCache | None) -> LowCmdApplyResult:
         """Apply the latest cached low-level DDS command if one exists.
 
-        The incoming DDS message is already CRC-validated by the subscriber.
-        This method only handles simulator-order translation plus articulation
-        writes. When no command has been received yet, it returns a no-op
-        result so the main loop can call it unconditionally.
+        The incoming lowcmd sample has already crossed the localhost sidecar
+        boundary and been cached by the subscriber. This method only handles
+        simulator-order translation plus articulation writes. When no command
+        has been received yet, it returns a no-op result so the main loop can
+        call it unconditionally.
         """
         if lowcmd is None:
             return LowCmdApplyResult(

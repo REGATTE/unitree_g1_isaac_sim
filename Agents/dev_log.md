@@ -1,7 +1,39 @@
 # Dev Log
 
-Historical entries from the earlier implementation phase are preserved in
-[Agents/old/dev_log.md](old/dev_log.md).
+## 2026-04-08 20:31:00 MST
+
+- Final cleanup pass on the active ROS 2 / CycloneDDS path.
+- Verified the main runtime code under `src/` is consistent on IMU
+  quaternion `wxyz`.
+- Updated remaining active helper tooling so it no longer depends on
+  `unitree_sdk2py`:
+  - `scripts/lowstate_listener.py`
+  - `scripts/send_lowcmd_offset.py`
+- Updated the smoke-test script to match the sidecar bridge era log
+  markers and listener output.
+- Added a direct bridge-protocol test for outgoing lowstate quaternion
+  packing:
+  - `tests/test_bridge_protocol.py`
+- Fixed the remaining sidecar fallback identity quaternion to scalar-first
+  `wxyz`.
+- Corrected stale runtime wording in `src/robot_control.py` so it no
+  longer refers to CRC validation on the old SDK path.
+- Removed stale references to `Agents/old/` after that archived folder was
+  intentionally deleted.
+
+Validation completed:
+
+- `python3 -m unittest tests/test_config.py tests/test_bridge_protocol.py tests/test_dds_lowcmd.py tests/test_dds_manager.py tests/test_lowstate_listener.py tests/test_robot_control.py`
+- `python3 -m py_compile src/config.py src/dds/bridge_protocol.py src/dds/g1_lowcmd.py src/dds/g1_lowstate.py src/dds/manager.py src/robot_control.py scripts/ros2_cyclonedds_sidecar.py scripts/lowstate_listener.py scripts/send_lowcmd_offset.py`
+
+Current status:
+
+- the active branch code path is now aligned with the ROS 2 sidecar
+  architecture
+- the active runtime path is free of `unitree_sdk2py`
+- `rt/lowstate` has been observed from ROS 2 successfully
+- next meaningful work is bounded `/rt/lowcmd` motion validation, then
+  500 Hz work if still required by Milestone 1
 
 ## 2026-04-08 20:05:00 MST
 
@@ -49,6 +81,8 @@ Status against `implementation_plan_ros2.md`:
 - the active runtime path is still free of `unitree_sdk2py`
 - the current work materially advances the transport replacement and
   runtime robustness needed before Milestone 1 validation
+- the active ROS 2 lowstate path now consistently emits IMU quaternion in
+  `wxyz`
 
 Next technical checks:
 
@@ -58,7 +92,6 @@ Next technical checks:
   visibility
 - verify `/lowcmd` ingress drives bounded simulator motion
 - then begin Milestone 1 items:
-  - explicit outward quaternion `wxyz` validation
   - real 500 Hz `lowstate` behavior
 
 ## 2026-04-08 19:50:02 MST
@@ -136,7 +169,6 @@ Status against `implementation_plan_ros2.md`:
   - message / transport handling moved away from the SDK path
   - manual CRC is no longer used in the active runtime bridge
 - `Milestone 1` has not started yet:
-  - quaternion output still needs the explicit `wxyz` check/update
   - real 500 Hz behavior still needs implementation/validation
   - bounded command-motion validation against `unitree_ros2` still
     remains

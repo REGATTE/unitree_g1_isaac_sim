@@ -33,7 +33,7 @@ def _make_sample(received_at_monotonic: float, tick: int, joint_index: int, q: f
         positions=positions,
         velocities=velocities,
         torques=torques,
-        imu_quaternion_xyzw=[0.0, 0.0, 0.0, 1.0],
+        imu_quaternion_wxyz=[1.0, 0.0, 0.0, 0.0],
         imu_accelerometer=[0.0, 0.0, 9.81],
         imu_gyroscope=[0.0, 0.0, 0.0],
     )
@@ -71,7 +71,7 @@ class LowStateListenerHelperTests(unittest.TestCase):
                 positions=[],
                 velocities=[],
                 torques=[],
-                imu_quaternion_xyzw=[0.0, 0.0, 0.0, 1.0],
+                imu_quaternion_wxyz=[1.0, 0.0, 0.0, 0.0],
                 imu_accelerometer=[0.0, 0.0, 9.81],
                 imu_gyroscope=[0.0, 0.0, 0.0],
             ),
@@ -115,7 +115,7 @@ class LowStateListenerHelperTests(unittest.TestCase):
                 positions=[],
                 velocities=[],
                 torques=[],
-                imu_quaternion_xyzw=[0.0, 0.0, 0.0, 1.0],
+                imu_quaternion_wxyz=[1.0, 0.0, 0.0, 0.0],
                 imu_accelerometer=[0.0, 0.0, 9.81],
                 imu_gyroscope=[0.0, 0.0, 0.0],
             ),
@@ -154,7 +154,7 @@ class LowStateListenerHelperTests(unittest.TestCase):
             )
 
         rendered = output.getvalue()
-        self.assertIn("tick=301 valid_messages=2 crc_rejected=1", rendered)
+        self.assertIn("tick=301 valid_messages=2 transport_rejected=1", rendered)
         self.assertIn("target_history left_shoulder_pitch_joint: samples=2 duration_s=0.100", rendered)
         self.assertIn("q_max=0.25000", rendered)
 

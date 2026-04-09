@@ -157,6 +157,5 @@ Useful runtime options:
 ## Documentation
 
 - active implementation notes: [Agents/dev_log.md](Agents/dev_log.md)
-- archived historical dev log: [Agents/old/dev_log.md](Agents/old/dev_log.md)
 - implementation plan: [Agents/implementation_plan_ros2.md](Agents/implementation_plan_ros2.md)
 - previous SDK-oriented documentation: [README_unitree_sdk2py.md](README_unitree_sdk2py.md)

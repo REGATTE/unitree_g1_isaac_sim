@@ -66,7 +66,7 @@ class Ros2CycloneDdsSidecar(Node):
         message = LowState()
         message.version = [1, 0]
         message.tick = int(payload.get("tick", 0))
-        message.imu_state.quaternion = payload.get("imu_quaternion_wxyz", [0.0, 0.0, 0.0, 1.0])
+        message.imu_state.quaternion = payload.get("imu_quaternion_wxyz", [1.0, 0.0, 0.0, 0.0])
         message.imu_state.accelerometer = payload.get("imu_accelerometer", [0.0, 0.0, 0.0])
         message.imu_state.gyroscope = payload.get("imu_gyroscope", [0.0, 0.0, 0.0])
 

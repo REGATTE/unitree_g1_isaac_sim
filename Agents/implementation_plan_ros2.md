@@ -28,11 +28,15 @@ low-level contract because it uses the same HG low-level DDS family.
 
 The first known compatibility risks are:
 
-- IMU quaternion layout on the DDS-facing state path
 - effective publish cadence versus the 500 Hz expectation in the G1
   low-level ROS 2 examples
 - final verification that ROS 2 topic naming resolves cleanly to the
   existing `rt/lowstate` and `rt/lowcmd` traffic
+
+Current note:
+
+- the active ROS 2 sidecar path now emits outgoing IMU quaternion in
+  `wxyz`
 
 ## Pre-Milestone 1: Remove `unitree_sdk2py` Runtime Dependence
 
@@ -78,8 +82,6 @@ Purpose:
 
 Required updates:
 
-- publish the outgoing IMU quaternion in `wxyz` on the DDS / ROS 2
-  facing lowstate message path
 - make the simulator capable of a real 500 Hz `lowstate` stream for the
   high-frequency G1 low-level path
 - keep using the high-frequency topics only:
@@ -89,20 +91,16 @@ Required updates:
 
 Checks for this milestone:
 
-1. Confirm the ROS 2-facing HG `LowState` message now exposes IMU
-   quaternion in the same ordering expected by `unitree_ros2` G1
-   examples.
-2. Confirm the runtime stepping / publish scheduling supports an actual
+1. Confirm the runtime stepping / publish scheduling supports an actual
    500 Hz state stream instead of only a configured target above the
    physics rate.
-3. Confirm a `unitree_ros2` G1 low-level example can:
+2. Confirm a `unitree_ros2` G1 low-level example can:
    - receive `lowstate`
    - publish `/lowcmd`
    - drive a bounded simulator motion
 
 Deliverables:
 
-- updated DDS / ROS 2 state packing for ROS 2 compatibility
 - updated runtime configuration and validation for 500 Hz operation
 - a documented manual validation flow against `unitree_ros2`
 
