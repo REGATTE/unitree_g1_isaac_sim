@@ -22,7 +22,7 @@ Covered by:
 
 ```bash
 python3 -m unittest \
-  tests/test_g1_lowcmd.py \
+  tests/test_dds_lowcmd.py \
   tests/test_dds_manager.py \
   tests/test_robot_control.py \
   tests/test_robot_state_pause_safe.py \

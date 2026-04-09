@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import math
 from dataclasses import dataclass
+import os
 from pathlib import Path
 
 
@@ -48,6 +49,11 @@ class AppConfig:
     lowcmd_timeout_seconds: float
     lowstate_cadence_report_interval: int
     lowstate_cadence_warn_ratio: float
+    unitree_ros2_install_prefix: Path | None
+    ros2_python_exe: str
+    bridge_bind_host: str
+    bridge_lowstate_port: int
+    bridge_lowcmd_port: int
 
     def resolve_asset_path(self) -> Path:
         asset_path = self.asset_path or DEFAULT_ASSET_BY_VARIANT[self.robot_variant]
@@ -211,7 +217,62 @@ def build_arg_parser() -> argparse.ArgumentParser:
             "this ratio, the runtime emits a warning instead of an info log."
         ),
     )
+    parser.add_argument(
+        "--unitree-ros2-install-prefix",
+        type=Path,
+        default=None,
+        help=(
+            "Path to the built `unitree_ros2/cyclonedds_ws/install` prefix. "
+            "If omitted, the runtime also checks the UNITREE_ROS2_INSTALL_PREFIX "
+            "environment variable and the default ~/Workspaces/unitree_ros2 "
+            "location."
+        ),
+    )
+    parser.add_argument(
+        "--ros2-python-exe",
+        type=str,
+        default=os.environ.get("ROS2_PYTHON_EXE", "/usr/bin/python3"),
+        help="Python executable used for the ROS 2 sidecar bridge process.",
+    )
+    parser.add_argument(
+        "--bridge-bind-host",
+        type=str,
+        default="127.0.0.1",
+        help="Localhost interface used for Isaac Sim <-> ROS 2 sidecar UDP traffic.",
+    )
+    parser.add_argument(
+        "--bridge-lowstate-port",
+        type=int,
+        default=5501,
+        help="UDP port used for Isaac Sim -> sidecar lowstate packets.",
+    )
+    parser.add_argument(
+        "--bridge-lowcmd-port",
+        type=int,
+        default=5502,
+        help="UDP port used for sidecar -> Isaac Sim lowcmd packets.",
+    )
     return parser
+
+
+def resolve_unitree_ros2_install_prefix(cli_value: Path | None) -> Path | None:
+    """Resolve the Unitree ROS 2 install prefix from CLI, env, or a default path."""
+    candidates: list[Path] = []
+    if cli_value is not None:
+        candidates.append(cli_value)
+
+    env_value = os.environ.get("UNITREE_ROS2_INSTALL_PREFIX")
+    if env_value:
+        candidates.append(Path(env_value))
+
+    candidates.append(PROJECT_ROOT.parents[2] / "unitree_ros2" / "cyclonedds_ws" / "install")
+    candidates.append(Path.home() / "Workspaces" / "unitree_ros2" / "cyclonedds_ws" / "install")
+
+    for candidate in candidates:
+        resolved = candidate.expanduser().resolve()
+        if resolved.exists():
+            return resolved
+    return None
 
 
 def parse_config(argv: list[str] | None = None) -> AppConfig:
@@ -238,4 +299,9 @@ def parse_config(argv: list[str] | None = None) -> AppConfig:
         lowcmd_timeout_seconds=args.lowcmd_timeout_seconds,
         lowstate_cadence_report_interval=args.lowstate_cadence_report_interval,
         lowstate_cadence_warn_ratio=args.lowstate_cadence_warn_ratio,
+        unitree_ros2_install_prefix=resolve_unitree_ros2_install_prefix(args.unitree_ros2_install_prefix),
+        ros2_python_exe=args.ros2_python_exe,
+        bridge_bind_host=args.bridge_bind_host,
+        bridge_lowstate_port=args.bridge_lowstate_port,
+        bridge_lowcmd_port=args.bridge_lowcmd_port,
     )

@@ -18,12 +18,19 @@ class ConfigDefaultsTests(unittest.TestCase):
         self.assertTrue(config.enable_dds)
         self.assertTrue(config.enable_lowcmd_subscriber)
         self.assertEqual(config.dds_domain_id, 1)
+        self.assertEqual(config.bridge_lowstate_port, 5501)
+        self.assertEqual(config.bridge_lowcmd_port, 5502)
 
     def test_boolean_optional_flags_can_disable_default_dds_path(self):
         config = parse_config(["--no-enable-dds", "--no-enable-lowcmd-subscriber"])
 
         self.assertFalse(config.enable_dds)
         self.assertFalse(config.enable_lowcmd_subscriber)
+
+    def test_unitree_ros2_install_prefix_can_be_provided_explicitly(self):
+        config = parse_config(["--unitree-ros2-install-prefix", "/tmp"])
+
+        self.assertEqual(str(config.unitree_ros2_install_prefix), "/tmp")
 
 
 if __name__ == "__main__":

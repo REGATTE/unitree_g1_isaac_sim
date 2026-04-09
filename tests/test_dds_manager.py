@@ -19,6 +19,9 @@ class _FakeLowCmdSubscriber:
         self.latest_command = latest_command
         self.clear_calls = 0
 
+    def poll(self):
+        return None
+
     def clear_cached_command(self):
         self.latest_command = None
         self.clear_calls += 1
@@ -56,6 +59,11 @@ def _build_config(**overrides) -> AppConfig:
         lowcmd_timeout_seconds=0.5,
         lowstate_cadence_report_interval=3,
         lowstate_cadence_warn_ratio=0.05,
+        unitree_ros2_install_prefix=None,
+        ros2_python_exe="/usr/bin/python3",
+        bridge_bind_host="127.0.0.1",
+        bridge_lowstate_port=5501,
+        bridge_lowcmd_port=5502,
     )
     if not overrides:
         return config
