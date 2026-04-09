@@ -100,6 +100,8 @@ class DdsManager:
 
     @property
     def latest_lowcmd(self) -> LowCmdCache | None:
+        if not self._config.enable_lowcmd_subscriber:
+            return None
         return self._resolve_latest_lowcmd(now_monotonic=time.monotonic())
 
     def initialize(self) -> bool:
@@ -145,7 +147,8 @@ class DdsManager:
 
         if self._sdk_enabled:
             self._poll_sidecar_health()
-            self._lowcmd_subscriber.poll()
+            if self._config.enable_lowcmd_subscriber:
+                self._lowcmd_subscriber.poll()
 
         lowstate_published = False
         if self._sdk_enabled and simulation_time_seconds >= self._next_lowstate_publish_time:
@@ -170,7 +173,10 @@ class DdsManager:
 
         return DdsStepResult(
             lowstate_published=lowstate_published,
-            lowcmd_available=self._lowcmd_subscriber.latest_command is not None,
+            lowcmd_available=(
+                self._config.enable_lowcmd_subscriber
+                and self._lowcmd_subscriber.latest_command is not None
+            ),
             lowcmd_fresh=active_lowcmd is not None,
         )
 
@@ -213,6 +219,9 @@ class DdsManager:
 
     def _resolve_latest_lowcmd(self, now_monotonic: float) -> LowCmdCache | None:
         """Return the current fresh lowcmd sample or `None` if stale/absent."""
+        if not self._config.enable_lowcmd_subscriber:
+            self._warned_stale_lowcmd = False
+            return None
         cached = self._lowcmd_subscriber.latest_command
         is_fresh = _is_fresh(now_monotonic, cached, self._config.lowcmd_timeout_seconds)
         if not is_fresh:

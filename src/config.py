@@ -276,7 +276,16 @@ def resolve_unitree_ros2_install_prefix(cli_value: Path | None) -> Path | None:
     if env_value:
         candidates.append(Path(env_value))
 
-    candidates.append(PROJECT_ROOT.parents[2] / "unitree_ros2" / "cyclonedds_ws" / "install")
+    workspace_root = next(
+        (
+            parent
+            for parent in PROJECT_ROOT.parents
+            if parent.name == "src" and parent.parent != parent
+        ),
+        None,
+    )
+    if workspace_root is not None:
+        candidates.append(workspace_root.parent / "unitree_ros2" / "cyclonedds_ws" / "install")
     candidates.append(Path.home() / "Workspaces" / "unitree_ros2" / "cyclonedds_ws" / "install")
 
     for candidate in candidates:

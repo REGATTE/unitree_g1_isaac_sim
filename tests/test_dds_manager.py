@@ -20,9 +20,11 @@ class _FakeLowCmdSubscriber:
     def __init__(self, latest_command=None):
         self.latest_command = latest_command
         self.clear_calls = 0
+        self.poll_calls = 0
         self.bound_port = 35502
 
     def poll(self):
+        self.poll_calls += 1
         return None
 
     def clear_cached_command(self):
@@ -219,6 +221,30 @@ class DdsManagerTests(unittest.TestCase):
         self.assertEqual(manager._simulation_cadence.publish_count, 0)
         self.assertIsNone(manager._wall_clock_cadence.window_start_time)
         self.assertEqual(manager._wall_clock_cadence.publish_count, 0)
+
+    def test_step_does_not_poll_lowcmd_when_subscriber_disabled(self):
+        manager = DdsManager(_build_config(enable_lowcmd_subscriber=False))
+        manager._initialized = True
+        manager._sdk_enabled = True
+        manager._lowstate_publisher = _FakeLowStatePublisher()
+        cached = LowCmdCache(
+            mode_pr=0,
+            mode_machine=0,
+            joint_positions_dds=tuple([0.0] * 29),
+            joint_velocities_dds=tuple([0.0] * 29),
+            joint_torques_dds=tuple([0.0] * 29),
+            joint_kp_dds=tuple([0.0] * 29),
+            joint_kd_dds=tuple([0.0] * 29),
+            received_at_monotonic=time.monotonic(),
+        )
+        subscriber = _FakeLowCmdSubscriber(latest_command=cached)
+        manager._lowcmd_subscriber = subscriber
+
+        result = manager.step(0.01, object())
+
+        self.assertEqual(subscriber.poll_calls, 0)
+        self.assertFalse(result.lowcmd_available)
+        self.assertFalse(result.lowcmd_fresh)
 
     def test_find_stale_sidecar_pids_filters_current_processes(self):
         manager = DdsManager(_build_config())

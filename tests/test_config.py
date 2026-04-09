@@ -1,6 +1,7 @@
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -8,7 +9,7 @@ SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from config import parse_config
+from config import parse_config, resolve_unitree_ros2_install_prefix
 
 
 class ConfigDefaultsTests(unittest.TestCase):
@@ -34,6 +35,12 @@ class ConfigDefaultsTests(unittest.TestCase):
         config = parse_config(["--unitree-ros2-install-prefix", "/tmp"])
 
         self.assertEqual(str(config.unitree_ros2_install_prefix), "/tmp")
+
+    def test_shallow_checkout_path_does_not_crash_prefix_resolution(self):
+        with patch("config.PROJECT_ROOT", Path("/workspace/unitree_g1_isaac_sim")):
+            resolved = resolve_unitree_ros2_install_prefix(None)
+
+        self.assertTrue(resolved is None or isinstance(resolved, Path))
 
     def test_lowstate_publish_rate_cannot_exceed_physics_rate(self):
         with self.assertRaises(SystemExit):

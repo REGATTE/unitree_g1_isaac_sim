@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
 import sys
 import time
 from dataclasses import dataclass
@@ -144,6 +145,7 @@ def main() -> int:
         return 1
 
     seed_listener = LowStateSeedListener()
+    os.environ["ROS_DOMAIN_ID"] = str(args.dds_domain_id)
     rclpy.init(args=None)
     node = Node("unitree_g1_lowcmd_sender", enable_rosout=False)
     node.create_subscription(LowState, args.lowstate_topic, seed_listener.on_message, 32)
