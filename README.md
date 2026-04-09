@@ -83,11 +83,17 @@ You can also override that path with:
 - Isaac Sim and ROS 2 Humble use different Python runtimes on this setup.
   Because of that, ROS 2 runs in a sidecar process rather than in the Isaac
   Sim Python process.
+- The default lowstate runtime target is `500 Hz`, with:
+  - `--physics-dt 0.002`
+  - `--lowstate-publish-hz 500`
 - The localhost UDP bridge defaults are:
   - lowstate: `127.0.0.1:35501`
   - lowcmd: `127.0.0.1:35502`
 - Startup attempts to clean up stale sidecar bridge processes from prior runs
   before launching a fresh bridge.
+- The runtime now logs two separate lowstate cadence diagnostics:
+  - `simulation_time`: cadence against the physics schedule
+  - `wall_clock`: realized publish cadence against host time
 
 ## Launch
 
@@ -124,20 +130,39 @@ ros2 topic list
 
 Expected topics include:
 
-- `/lowstate`
-- `/lowcmd`
+- `/rt/lowstate`
+- `/rt/lowcmd`
 
 Inspect lowstate:
 
 ```bash
-ros2 topic echo /lowstate
+ros2 topic echo /rt/lowstate --once
 ```
 
 Publish a simple lowcmd smoke-test message:
 
 ```bash
-ros2 topic pub --once /lowcmd unitree_hg/msg/LowCmd "{mode_pr: 0, mode_machine: 0}"
+ros2 topic pub --once /rt/lowcmd unitree_hg/msg/LowCmd "{mode_pr: 0, mode_machine: 0}"
 ```
+
+Check the external lowstate rate from ROS 2:
+
+```bash
+ros2 topic hz /rt/lowstate
+```
+
+Current runtime expectation:
+
+- the configured target is `500 Hz`
+- the observed end-to-end ROS 2 rate has been about `467-470 Hz`
+- this is currently accepted for this branch as long as the realized rate
+  remains above `450 Hz`
+
+The simulator-side cadence log is useful when you want to compare:
+
+- the intended lowstate cadence from the physics loop
+- the realized wall-clock cadence inside the Isaac Sim process
+- the external observer reported by `ros2 topic hz`
 
 ## Configuration
 

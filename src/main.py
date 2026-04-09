@@ -164,7 +164,14 @@ def main() -> int:
         world = create_world(config)
         state_reader = initialize_robot_state_reader(config)
         dds_manager = DdsManager(config) if config.enable_dds else None
-        command_applier = RobotCommandApplier(state_reader) if config.enable_dds else None
+        command_applier = (
+            RobotCommandApplier(
+                state_reader,
+                max_position_delta_rad=config.lowcmd_max_position_delta_rad,
+            )
+            if config.enable_dds
+            else None
+        )
         if dds_manager is not None:
             dds_manager.initialize()
         run_main_loop(

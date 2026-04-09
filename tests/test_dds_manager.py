@@ -70,6 +70,7 @@ def _build_config(**overrides) -> AppConfig:
         lowstate_topic="rt/lowstate",
         lowcmd_topic="rt/lowcmd",
         lowstate_publish_hz=100.0,
+        lowcmd_max_position_delta_rad=0.25,
         enable_lowcmd_subscriber=True,
         lowcmd_timeout_seconds=0.5,
         lowstate_cadence_report_interval=3,
@@ -146,12 +147,24 @@ class DdsManagerTests(unittest.TestCase):
         manager = DdsManager(_build_config())
 
         with self.assertLogs("unitree_g1_isaac_sim.dds.manager", level="INFO") as captured:
-            manager._cadence.record(0.00, expected_hz=100.0, interval=3, warn_ratio=0.05)
-            manager._cadence.record(0.01, expected_hz=100.0, interval=3, warn_ratio=0.05)
-            manager._cadence.record(0.02, expected_hz=100.0, interval=3, warn_ratio=0.05)
+            manager._simulation_cadence.record(0.00, expected_hz=100.0, interval=3, warn_ratio=0.05)
+            manager._simulation_cadence.record(0.01, expected_hz=100.0, interval=3, warn_ratio=0.05)
+            manager._simulation_cadence.record(0.02, expected_hz=100.0, interval=3, warn_ratio=0.05)
 
         output = "\n".join(captured.output)
-        self.assertIn("lowstate cadence check", output)
+        self.assertIn("lowstate cadence check (simulation_time)", output)
+        self.assertIn("observed=100.000Hz", output)
+
+    def test_wall_clock_cadence_reporting_emits_distinct_label(self):
+        manager = DdsManager(_build_config())
+
+        with self.assertLogs("unitree_g1_isaac_sim.dds.manager", level="INFO") as captured:
+            manager._wall_clock_cadence.record(10.00, expected_hz=100.0, interval=3, warn_ratio=0.05)
+            manager._wall_clock_cadence.record(10.01, expected_hz=100.0, interval=3, warn_ratio=0.05)
+            manager._wall_clock_cadence.record(10.02, expected_hz=100.0, interval=3, warn_ratio=0.05)
+
+        output = "\n".join(captured.output)
+        self.assertIn("lowstate cadence check (wall_clock)", output)
         self.assertIn("observed=100.000Hz", output)
 
     def test_lowstate_schedule_does_not_reanchor_to_current_frame(self):
@@ -191,8 +204,10 @@ class DdsManagerTests(unittest.TestCase):
         manager._lowcmd_subscriber = subscriber
         manager._warned_stale_lowcmd = True
         manager._next_lowstate_publish_time = 12.5
-        manager._cadence.window_start_time = 5.0
-        manager._cadence.publish_count = 10
+        manager._simulation_cadence.window_start_time = 5.0
+        manager._simulation_cadence.publish_count = 10
+        manager._wall_clock_cadence.window_start_time = 6.0
+        manager._wall_clock_cadence.publish_count = 11
 
         manager.reset_runtime_state()
 
@@ -200,8 +215,10 @@ class DdsManagerTests(unittest.TestCase):
         self.assertEqual(subscriber.clear_calls, 1)
         self.assertFalse(manager._warned_stale_lowcmd)
         self.assertEqual(manager._next_lowstate_publish_time, 0.0)
-        self.assertIsNone(manager._cadence.window_start_time)
-        self.assertEqual(manager._cadence.publish_count, 0)
+        self.assertIsNone(manager._simulation_cadence.window_start_time)
+        self.assertEqual(manager._simulation_cadence.publish_count, 0)
+        self.assertIsNone(manager._wall_clock_cadence.window_start_time)
+        self.assertEqual(manager._wall_clock_cadence.publish_count, 0)
 
     def test_find_stale_sidecar_pids_filters_current_processes(self):
         manager = DdsManager(_build_config())

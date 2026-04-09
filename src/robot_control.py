@@ -31,14 +31,17 @@ class LowCmdApplyResult:
     velocity_applied: bool
     effort_applied: bool
     gains_applied: bool
+    rejected_by_safety: bool
 
 
 class RobotCommandApplier:
     """Apply cached DDS body commands to the live G1 articulation."""
 
-    def __init__(self, state_reader: RobotStateReader) -> None:
+    def __init__(self, state_reader: RobotStateReader, *, max_position_delta_rad: float) -> None:
         self._state_reader = state_reader
+        self._max_position_delta_rad = max_position_delta_rad
         self._warned_about_gains = False
+        self._warned_about_position_bound = False
 
     def apply_lowcmd(self, lowcmd: LowCmdCache | None) -> LowCmdApplyResult:
         """Apply the latest cached low-level DDS command if one exists.
@@ -56,10 +59,20 @@ class RobotCommandApplier:
                 velocity_applied=False,
                 effort_applied=False,
                 gains_applied=False,
+                rejected_by_safety=False,
             )
 
         sim_order_command = lowcmd.to_sim_order()
         try:
+            if self._should_reject_for_position_delta(sim_order_command.positions):
+                return LowCmdApplyResult(
+                    command_seen=True,
+                    position_applied=False,
+                    velocity_applied=False,
+                    effort_applied=False,
+                    gains_applied=False,
+                    rejected_by_safety=True,
+                )
             position_applied = self._state_reader.apply_joint_position_targets(sim_order_command.positions)
             velocity_applied = self._state_reader.apply_joint_velocity_targets(sim_order_command.velocities)
             effort_applied = self._state_reader.apply_joint_efforts(sim_order_command.torques)
@@ -74,6 +87,7 @@ class RobotCommandApplier:
                 velocity_applied=False,
                 effort_applied=False,
                 gains_applied=False,
+                rejected_by_safety=False,
             )
 
         self._warn_if_gains_are_not_applied(lowcmd, gains_applied)
@@ -83,7 +97,42 @@ class RobotCommandApplier:
             velocity_applied=velocity_applied,
             effort_applied=effort_applied,
             gains_applied=gains_applied,
+            rejected_by_safety=False,
         )
+
+    def _should_reject_for_position_delta(self, target_positions: list[float]) -> bool:
+        """Reject obviously unsafe posture jumps before they hit the articulation."""
+        if self._max_position_delta_rad <= 0.0:
+            return False
+
+        current_positions = self._state_reader.read_snapshot().joint_positions
+        if len(current_positions) != len(target_positions):
+            raise ValueError(
+                "Current simulator joint-position width does not match incoming lowcmd width: "
+                f"current={len(current_positions)} target={len(target_positions)}"
+            )
+
+        max_delta = 0.0
+        max_index = 0
+        for index, (current_value, target_value) in enumerate(zip(current_positions, target_positions)):
+            delta = abs(float(target_value) - float(current_value))
+            if delta > max_delta:
+                max_delta = delta
+                max_index = index
+
+        if max_delta <= self._max_position_delta_rad:
+            return False
+
+        if not self._warned_about_position_bound:
+            LOGGER.warning(
+                "rejected `rt/lowcmd` due to bounded-motion safety check: "
+                "max_position_delta=%.4frad limit=%.4frad joint_index=%s",
+                max_delta,
+                self._max_position_delta_rad,
+                max_index,
+            )
+            self._warned_about_position_bound = True
+        return True
 
     def _warn_if_gains_are_not_applied(self, lowcmd: LowCmdCache, gains_applied: bool) -> None:
         """Emit a one-time note about `kp`/`kd` support gaps.

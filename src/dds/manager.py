@@ -34,6 +34,7 @@ class DdsStepResult:
 class CadenceTracker:
     """Track rolling lowstate cadence diagnostics."""
 
+    label: str
     window_start_time: float | None = None
     publish_count: int = 0
 
@@ -55,8 +56,9 @@ class CadenceTracker:
         relative_error = 0.0 if expected_hz <= 0.0 else abs(observed_hz - expected_hz) / expected_hz
         log_method = LOGGER.warning if relative_error > warn_ratio else LOGGER.info
         log_method(
-            "lowstate cadence check: observed=%.3fHz expected=%.3fHz publishes=%s "
+            "lowstate cadence check (%s): observed=%.3fHz expected=%.3fHz publishes=%s "
             "window_dt=%.3fs rel_error=%.3f%%",
+            self.label,
             observed_hz,
             expected_hz,
             publishes,
@@ -93,7 +95,8 @@ class DdsManager:
             bind_port=config.bridge_lowcmd_port,
         )
         self._warned_stale_lowcmd = False
-        self._cadence = CadenceTracker()
+        self._simulation_cadence = CadenceTracker(label="simulation_time")
+        self._wall_clock_cadence = CadenceTracker(label="wall_clock")
 
     @property
     def latest_lowcmd(self) -> LowCmdCache | None:
@@ -149,8 +152,15 @@ class DdsManager:
             lowstate_published = self._lowstate_publisher.publish(snapshot)
             self._advance_lowstate_publish_schedule(simulation_time_seconds)
             if lowstate_published:
-                self._cadence.record(
+                wall_clock_seconds = time.monotonic()
+                self._simulation_cadence.record(
                     simulation_time_seconds,
+                    expected_hz=self._config.lowstate_publish_hz,
+                    interval=self._config.lowstate_cadence_report_interval,
+                    warn_ratio=self._config.lowstate_cadence_warn_ratio,
+                )
+                self._wall_clock_cadence.record(
+                    wall_clock_seconds,
                     expected_hz=self._config.lowstate_publish_hz,
                     interval=self._config.lowstate_cadence_report_interval,
                     warn_ratio=self._config.lowstate_cadence_warn_ratio,
@@ -188,7 +198,8 @@ class DdsManager:
         self._initialized = False
         self._warned_stale_lowcmd = False
         self._next_lowstate_publish_time = 0.0
-        self._cadence = CadenceTracker()
+        self._simulation_cadence = CadenceTracker(label="simulation_time")
+        self._wall_clock_cadence = CadenceTracker(label="wall_clock")
 
     def reset_runtime_state(self) -> None:
         """Clear transient DDS runtime state after an in-session simulator reset."""
@@ -196,7 +207,8 @@ class DdsManager:
             self._lowcmd_subscriber.clear_cached_command()
         self._warned_stale_lowcmd = False
         self._next_lowstate_publish_time = 0.0
-        self._cadence = CadenceTracker()
+        self._simulation_cadence = CadenceTracker(label="simulation_time")
+        self._wall_clock_cadence = CadenceTracker(label="wall_clock")
         LOGGER.info("cleared DDS runtime state after simulator reset")
 
     def _resolve_latest_lowcmd(self, now_monotonic: float) -> LowCmdCache | None:

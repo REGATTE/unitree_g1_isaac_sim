@@ -45,6 +45,7 @@ class AppConfig:
     lowstate_topic: str
     lowcmd_topic: str
     lowstate_publish_hz: float
+    lowcmd_max_position_delta_rad: float
     enable_lowcmd_subscriber: bool
     lowcmd_timeout_seconds: float
     lowstate_cadence_report_interval: int
@@ -101,7 +102,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--physics-dt",
         type=positive_finite_float,
-        default=1.0 / 120.0,
+        default=1.0 / 500.0,
         help="Physics timestep in seconds.",
     )
     parser.add_argument(
@@ -177,8 +178,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--lowstate-publish-hz",
         type=positive_finite_float,
-        default=100.0,
+        default=500.0,
         help="Target DDS publish rate in Hz for `rt/lowstate`.",
+    )
+    parser.add_argument(
+        "--lowcmd-max-position-delta-rad",
+        type=float,
+        default=0.25,
+        help=(
+            "Maximum allowed absolute joint-position delta, in radians, between "
+            "the current simulator pose and an incoming `rt/lowcmd` target. "
+            "Use 0 to disable bounded-motion rejection."
+        ),
     )
     parser.add_argument(
         "--enable-lowcmd-subscriber",
@@ -276,7 +287,17 @@ def resolve_unitree_ros2_install_prefix(cli_value: Path | None) -> Path | None:
 
 
 def parse_config(argv: list[str] | None = None) -> AppConfig:
-    args = build_arg_parser().parse_args(argv)
+    parser = build_arg_parser()
+    args = parser.parse_args(argv)
+    physics_hz = 1.0 / args.physics_dt
+    if args.lowstate_publish_hz - physics_hz > 1e-9:
+        parser.error(
+            "--lowstate-publish-hz cannot exceed the physics rate derived from "
+            f"--physics-dt. requested={args.lowstate_publish_hz:.3f}Hz "
+            f"physics_rate={physics_hz:.3f}Hz"
+        )
+    if args.lowcmd_max_position_delta_rad < 0.0 or not math.isfinite(args.lowcmd_max_position_delta_rad):
+        parser.error("--lowcmd-max-position-delta-rad must be a finite non-negative float.")
     return AppConfig(
         robot_variant=args.robot_variant,
         asset_path=args.asset_path,
@@ -295,6 +316,7 @@ def parse_config(argv: list[str] | None = None) -> AppConfig:
         lowstate_topic=args.lowstate_topic,
         lowcmd_topic=args.lowcmd_topic,
         lowstate_publish_hz=args.lowstate_publish_hz,
+        lowcmd_max_position_delta_rad=args.lowcmd_max_position_delta_rad,
         enable_lowcmd_subscriber=args.enable_lowcmd_subscriber,
         lowcmd_timeout_seconds=args.lowcmd_timeout_seconds,
         lowstate_cadence_report_interval=args.lowstate_cadence_report_interval,

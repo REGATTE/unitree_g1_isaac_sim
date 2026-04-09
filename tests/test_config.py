@@ -18,6 +18,9 @@ class ConfigDefaultsTests(unittest.TestCase):
         self.assertTrue(config.enable_dds)
         self.assertTrue(config.enable_lowcmd_subscriber)
         self.assertEqual(config.dds_domain_id, 1)
+        self.assertAlmostEqual(config.physics_dt, 1.0 / 500.0)
+        self.assertEqual(config.lowstate_publish_hz, 500.0)
+        self.assertEqual(config.lowcmd_max_position_delta_rad, 0.25)
         self.assertEqual(config.bridge_lowstate_port, 35501)
         self.assertEqual(config.bridge_lowcmd_port, 35502)
 
@@ -31,6 +34,10 @@ class ConfigDefaultsTests(unittest.TestCase):
         config = parse_config(["--unitree-ros2-install-prefix", "/tmp"])
 
         self.assertEqual(str(config.unitree_ros2_install_prefix), "/tmp")
+
+    def test_lowstate_publish_rate_cannot_exceed_physics_rate(self):
+        with self.assertRaises(SystemExit):
+            parse_config(["--physics-dt", "0.01", "--lowstate-publish-hz", "500"])
 
 
 if __name__ == "__main__":

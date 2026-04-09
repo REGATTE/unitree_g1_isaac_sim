@@ -1,5 +1,39 @@
 # Dev Log
 
+## 2026-04-08 20:41:00 MST
+
+- Added an internal simulator-side wall-clock cadence diagnostic for
+  outgoing `rt/lowstate`, separate from the existing simulation-time
+  cadence check and separate from external `ros2 topic hz`.
+- `src/dds/manager.py` now reports two cadence views:
+  - `lowstate cadence check (simulation_time)`
+  - `lowstate cadence check (wall_clock)`
+- This keeps the runtime-side cadence signal visible even when the ROS 2
+  CLI is not attached.
+- Updated `README.md` to:
+  - use the actual active topics:
+    - `/rt/lowstate`
+    - `/rt/lowcmd`
+  - document the default 500 Hz runtime target
+  - document the new internal cadence logs
+  - record the currently observed external ROS 2 lowstate rate of about
+    `467-470 Hz`
+  - note the current branch acceptance threshold of `>450 Hz`
+
+Validation completed:
+
+- `python3 -m unittest tests/test_dds_manager.py`
+
+Current status:
+
+- the branch still targets `500 Hz`
+- the realized end-to-end ROS 2 rate observed so far is about
+  `467-470 Hz`
+- that rate is currently acceptable for this branch because it remains
+  above `450 Hz`
+- the runtime now exposes both simulation-time and wall-clock cadence
+  views for future tuning
+
 ## 2026-04-08 20:31:00 MST
 
 - Final cleanup pass on the active ROS 2 / CycloneDDS path.
