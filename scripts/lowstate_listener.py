@@ -6,8 +6,8 @@ from __future__ import annotations
 import argparse
 import csv
 import math
+import os
 import sys
-import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,7 +39,7 @@ class LowStateSample:
     positions: list[float]
     velocities: list[float]
     torques: list[float]
-    imu_quaternion_xyzw: list[float]
+    imu_quaternion_wxyz: list[float]
     imu_accelerometer: list[float]
     imu_gyroscope: list[float]
 
@@ -54,42 +54,30 @@ class LowStateCapture:
 
 class LowStateListener:
     def __init__(self, topic_name: str, max_history_samples: int = 5000) -> None:
-        from unitree_sdk2py.utils.crc import CRC
-
         self._topic_name = topic_name
         self._max_history_samples = max(max_history_samples, 1)
-        self._crc = CRC()
         self._latest: LowStateSample | None = None
         self._history: list[LowStateSample] = []
-        self._lock = threading.Lock()
         self._messages_seen = 0
         self._messages_rejected = 0
 
     @property
     def latest(self) -> LowStateSample | None:
-        with self._lock:
-            return self._latest
+        return self._latest
 
     @property
     def history(self) -> list[LowStateSample]:
-        with self._lock:
-            return list(self._history)
+        return list(self._history)
 
     def capture(self) -> LowStateCapture:
-        with self._lock:
-            return LowStateCapture(
-                latest=self._latest,
-                history=list(self._history),
-                messages_seen=self._messages_seen,
-                messages_rejected=self._messages_rejected,
-            )
+        return LowStateCapture(
+            latest=self._latest,
+            history=list(self._history),
+            messages_seen=self._messages_seen,
+            messages_rejected=self._messages_rejected,
+        )
 
     def on_message(self, msg) -> None:
-        if self._crc.Crc(msg) != msg.crc:
-            with self._lock:
-                self._messages_rejected += 1
-            return
-
         motor_state = msg.motor_state
         sample = LowStateSample(
             received_at_monotonic=time.monotonic(),
@@ -97,17 +85,16 @@ class LowStateListener:
             positions=[float(motor_state[index].q) for index in range(len(motor_state))],
             velocities=[float(motor_state[index].dq) for index in range(len(motor_state))],
             torques=[float(motor_state[index].tau_est) for index in range(len(motor_state))],
-            imu_quaternion_xyzw=[float(value) for value in msg.imu_state.quaternion],
+            imu_quaternion_wxyz=[float(value) for value in msg.imu_state.quaternion],
             imu_accelerometer=[float(value) for value in msg.imu_state.accelerometer],
             imu_gyroscope=[float(value) for value in msg.imu_state.gyroscope],
         )
-        with self._lock:
-            self._latest = sample
-            self._history.append(sample)
-            overflow = len(self._history) - self._max_history_samples
-            if overflow > 0:
-                del self._history[:overflow]
-            self._messages_seen += 1
+        self._latest = sample
+        self._history.append(sample)
+        overflow = len(self._history) - self._max_history_samples
+        if overflow > 0:
+            del self._history[:overflow]
+        self._messages_seen += 1
 
     def print_summary(
         self,
@@ -136,7 +123,7 @@ def print_lowstate_capture_summary(
         print("No valid lowstate sample received yet.")
         return
 
-    print(f"tick={sample.tick} valid_messages={capture.messages_seen} crc_rejected={capture.messages_rejected}")
+    print(f"tick={sample.tick} valid_messages={capture.messages_seen} transport_rejected={capture.messages_rejected}")
     target_joint_index = None
     if target_joint_name is not None:
         target_joint_index = resolve_joint_index(target_joint_name)
@@ -155,7 +142,7 @@ def print_lowstate_capture_summary(
             f"dq={sample.velocities[index]: .5f} "
             f"tau={sample.torques[index]: .5f}"
         )
-    print(f"imu_quaternion_xyzw={_format_vector(sample.imu_quaternion_xyzw)}")
+    print(f"imu_quaternion_wxyz={_format_vector(sample.imu_quaternion_wxyz)}")
     print(f"imu_accelerometer={_format_vector(sample.imu_accelerometer)}")
     print(f"imu_gyroscope={_format_vector(sample.imu_gyroscope)}")
     if target_joint_name is not None:
@@ -279,10 +266,11 @@ def main() -> int:
     args = build_parser().parse_args()
 
     try:
-        from unitree_sdk2py.core.channel import ChannelFactoryInitialize, ChannelSubscriber
-        from unitree_sdk2py.idl.unitree_hg.msg.dds_ import LowState_
+        import rclpy
+        from rclpy.node import Node
+        from unitree_hg.msg import LowState
     except ImportError as exc:
-        print(f"Failed to import unitree_sdk2py: {exc}", file=sys.stderr)
+        print(f"Failed to import ROS 2 lowstate dependencies: {exc}", file=sys.stderr)
         return 1
 
     try:
@@ -290,14 +278,21 @@ def main() -> int:
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 1
-    listener = LowStateListener(topic_name=args.topic)
-    ChannelFactoryInitialize(args.dds_domain_id)
-    subscriber = ChannelSubscriber(args.topic, LowState_)
-    subscriber.Init(listener.on_message, 32)
 
-    deadline = time.time() + max(args.duration, 0.0)
-    while time.time() < deadline:
-        time.sleep(0.05)
+    listener = LowStateListener(topic_name=args.topic)
+    os.environ["ROS_DOMAIN_ID"] = str(args.dds_domain_id)
+    rclpy.init(args=None)
+    node = Node("unitree_g1_lowstate_listener", enable_rosout=False)
+    node.create_subscription(LowState, args.topic, listener.on_message, 32)
+
+    deadline = time.monotonic() + max(args.duration, 0.0)
+    try:
+        while time.monotonic() < deadline and rclpy.ok():
+            rclpy.spin_once(node, timeout_sec=0.05)
+    finally:
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
     capture = listener.capture()
     history = capture.history

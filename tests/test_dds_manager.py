@@ -1,6 +1,8 @@
+import os
 import sys
 import time
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 
@@ -18,19 +20,37 @@ class _FakeLowCmdSubscriber:
     def __init__(self, latest_command=None):
         self.latest_command = latest_command
         self.clear_calls = 0
+        self.poll_calls = 0
+        self.bound_port = 35502
+
+    def poll(self):
+        self.poll_calls += 1
+        return None
 
     def clear_cached_command(self):
         self.latest_command = None
         self.clear_calls += 1
+
+    def initialize(self):
+        return True
+
+    def close(self):
+        return None
 
 
 class _FakeLowStatePublisher:
     def __init__(self):
         self.publish_calls = 0
 
+    def initialize(self):
+        return True
+
     def publish(self, snapshot):
         self.publish_calls += 1
         return True
+
+    def close(self):
+        return None
 
 
 def _build_config(**overrides) -> AppConfig:
@@ -52,10 +72,16 @@ def _build_config(**overrides) -> AppConfig:
         lowstate_topic="rt/lowstate",
         lowcmd_topic="rt/lowcmd",
         lowstate_publish_hz=100.0,
+        lowcmd_max_position_delta_rad=0.25,
         enable_lowcmd_subscriber=True,
         lowcmd_timeout_seconds=0.5,
         lowstate_cadence_report_interval=3,
         lowstate_cadence_warn_ratio=0.05,
+        unitree_ros2_install_prefix=None,
+        ros2_python_exe="/usr/bin/python3",
+        bridge_bind_host="127.0.0.1",
+        bridge_lowstate_port=35501,
+        bridge_lowcmd_port=35502,
     )
     if not overrides:
         return config
@@ -123,12 +149,24 @@ class DdsManagerTests(unittest.TestCase):
         manager = DdsManager(_build_config())
 
         with self.assertLogs("unitree_g1_isaac_sim.dds.manager", level="INFO") as captured:
-            manager._cadence.record(0.00, expected_hz=100.0, interval=3, warn_ratio=0.05)
-            manager._cadence.record(0.01, expected_hz=100.0, interval=3, warn_ratio=0.05)
-            manager._cadence.record(0.02, expected_hz=100.0, interval=3, warn_ratio=0.05)
+            manager._simulation_cadence.record(0.00, expected_hz=100.0, interval=3, warn_ratio=0.05)
+            manager._simulation_cadence.record(0.01, expected_hz=100.0, interval=3, warn_ratio=0.05)
+            manager._simulation_cadence.record(0.02, expected_hz=100.0, interval=3, warn_ratio=0.05)
 
         output = "\n".join(captured.output)
-        self.assertIn("lowstate cadence check", output)
+        self.assertIn("lowstate cadence check (simulation_time)", output)
+        self.assertIn("observed=100.000Hz", output)
+
+    def test_wall_clock_cadence_reporting_emits_distinct_label(self):
+        manager = DdsManager(_build_config())
+
+        with self.assertLogs("unitree_g1_isaac_sim.dds.manager", level="INFO") as captured:
+            manager._wall_clock_cadence.record(10.00, expected_hz=100.0, interval=3, warn_ratio=0.05)
+            manager._wall_clock_cadence.record(10.01, expected_hz=100.0, interval=3, warn_ratio=0.05)
+            manager._wall_clock_cadence.record(10.02, expected_hz=100.0, interval=3, warn_ratio=0.05)
+
+        output = "\n".join(captured.output)
+        self.assertIn("lowstate cadence check (wall_clock)", output)
         self.assertIn("observed=100.000Hz", output)
 
     def test_lowstate_schedule_does_not_reanchor_to_current_frame(self):
@@ -168,8 +206,10 @@ class DdsManagerTests(unittest.TestCase):
         manager._lowcmd_subscriber = subscriber
         manager._warned_stale_lowcmd = True
         manager._next_lowstate_publish_time = 12.5
-        manager._cadence.window_start_time = 5.0
-        manager._cadence.publish_count = 10
+        manager._simulation_cadence.window_start_time = 5.0
+        manager._simulation_cadence.publish_count = 10
+        manager._wall_clock_cadence.window_start_time = 6.0
+        manager._wall_clock_cadence.publish_count = 11
 
         manager.reset_runtime_state()
 
@@ -177,8 +217,53 @@ class DdsManagerTests(unittest.TestCase):
         self.assertEqual(subscriber.clear_calls, 1)
         self.assertFalse(manager._warned_stale_lowcmd)
         self.assertEqual(manager._next_lowstate_publish_time, 0.0)
-        self.assertIsNone(manager._cadence.window_start_time)
-        self.assertEqual(manager._cadence.publish_count, 0)
+        self.assertIsNone(manager._simulation_cadence.window_start_time)
+        self.assertEqual(manager._simulation_cadence.publish_count, 0)
+        self.assertIsNone(manager._wall_clock_cadence.window_start_time)
+        self.assertEqual(manager._wall_clock_cadence.publish_count, 0)
+
+    def test_step_does_not_poll_lowcmd_when_subscriber_disabled(self):
+        manager = DdsManager(_build_config(enable_lowcmd_subscriber=False))
+        manager._initialized = True
+        manager._sdk_enabled = True
+        manager._lowstate_publisher = _FakeLowStatePublisher()
+        cached = LowCmdCache(
+            mode_pr=0,
+            mode_machine=0,
+            joint_positions_dds=tuple([0.0] * 29),
+            joint_velocities_dds=tuple([0.0] * 29),
+            joint_torques_dds=tuple([0.0] * 29),
+            joint_kp_dds=tuple([0.0] * 29),
+            joint_kd_dds=tuple([0.0] * 29),
+            received_at_monotonic=time.monotonic(),
+        )
+        subscriber = _FakeLowCmdSubscriber(latest_command=cached)
+        manager._lowcmd_subscriber = subscriber
+
+        result = manager.step(0.01, object())
+
+        self.assertEqual(subscriber.poll_calls, 0)
+        self.assertFalse(result.lowcmd_available)
+        self.assertFalse(result.lowcmd_fresh)
+
+    def test_find_stale_sidecar_pids_filters_current_processes(self):
+        manager = DdsManager(_build_config())
+        sidecar_script = REPO_ROOT / "scripts" / "ros2_cyclonedds_sidecar.py"
+        manager._bridge_process = type("Proc", (), {"pid": 22222, "poll": lambda self: None})()
+        ps_output = "\n".join(
+            [
+                f"{os.getpid()} /usr/bin/python3 {sidecar_script}",
+                f"22222 /usr/bin/python3 {sidecar_script}",
+                f"33333 /usr/bin/python3 {sidecar_script}",
+                "44444 /usr/bin/python3 some_other_script.py",
+            ]
+        )
+
+        with patch("dds.manager.subprocess.run") as run_mock:
+            run_mock.return_value.stdout = ps_output
+            stale = manager._find_stale_sidecar_pids(sidecar_script)
+
+        self.assertEqual(stale, [33333])
 
 
 if __name__ == "__main__":

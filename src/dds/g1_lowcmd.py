@@ -1,21 +1,17 @@
-"""`rt/lowcmd` subscription boundary for the Unitree G1 simulator.
-
-This module owns the raw DDS ingest side of the body low-level command path.
-It validates incoming Unitree messages, clamps the message width to the
-supported 29 body joints, and exposes a cached simulator-agnostic command
-snapshot that the runtime loop can translate into Isaac Sim control writes.
-"""
+"""Local lowcmd subscription boundary between the ROS 2 sidecar and Isaac Sim."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+import errno
 from functools import lru_cache
+import socket
 import time
-from typing import Any
 
 from mapping.joints import BODY_JOINT_COUNT
 from mapping import reorder_dds_values_to_sim
 from runtime_logging import get_logger
+from .bridge_protocol import decode_lowcmd_packet
 
 LOGGER = get_logger("dds.lowcmd")
 
@@ -60,15 +56,14 @@ class LowCmdCache:
 
 
 class G1LowCmdSubscriber:
-    """Receive raw `rt/lowcmd` messages and cache the latest validated sample."""
+    """Receive lowcmd packets from the localhost sidecar and cache the latest sample."""
 
-    def __init__(self, topic_name: str = "rt/lowcmd") -> None:
-        self._topic_name = topic_name
-        self._subscriber: Any | None = None
-        self._crc_helper: Any | None = None
+    def __init__(self, bind_host: str, bind_port: int) -> None:
+        self._bind_host = bind_host
+        self._bind_port = bind_port
+        self._socket: socket.socket | None = None
         self._latest_command: LowCmdCache | None = None
-        self._sdk_enabled = False
-        self._warned_unavailable = False
+        self._transport_ready = False
 
     @property
     def latest_command(self) -> LowCmdCache | None:
@@ -78,54 +73,79 @@ class G1LowCmdSubscriber:
         """Discard any previously received lowcmd sample."""
         self._latest_command = None
 
-    def initialize(self) -> bool:
-        """Create the Unitree subscriber if the SDK is installed."""
-        if self._sdk_enabled:
-            return True
-        try:
-            from unitree_sdk2py.core.channel import ChannelSubscriber
-            from unitree_sdk2py.idl.unitree_hg.msg.dds_ import LowCmd_
-            from unitree_sdk2py.utils.crc import CRC
-        except ImportError:
-            if not self._warned_unavailable:
-                LOGGER.warning(
-                    "DDS lowcmd subscriber requested but `unitree_sdk2py` is not installed. "
-                    "Skipping subscription."
-                )
-                self._warned_unavailable = True
-            return False
+    @property
+    def bound_port(self) -> int:
+        """Return the currently bound UDP port, if initialized."""
+        if self._socket is None:
+            return self._bind_port
+        return int(self._socket.getsockname()[1])
 
-        self._crc_helper = CRC()
-        self._subscriber = ChannelSubscriber(self._topic_name, LowCmd_)
-        self._subscriber.Init(self._on_message, 32)
-        self._sdk_enabled = True
-        LOGGER.info("DDS lowcmd subscriber ready on %s", self._topic_name)
+    def initialize(self) -> bool:
+        """Bind the localhost UDP socket used by the sidecar bridge."""
+        if self._transport_ready:
+            return True
+        self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            self._socket.bind((self._bind_host, self._bind_port))
+        except OSError as exc:
+            if exc.errno != errno.EADDRINUSE or self._bind_port == 0:
+                self._socket.close()
+                self._socket = None
+                raise
+            LOGGER.warning(
+                "lowcmd UDP port %s is already in use on %s; falling back to an ephemeral localhost port.",
+                self._bind_port,
+                self._bind_host,
+            )
+            self._socket.bind((self._bind_host, 0))
+        self._socket.setblocking(False)
+        self._transport_ready = True
+        LOGGER.info("lowcmd UDP subscriber ready on %s:%s", self._bind_host, self.bound_port)
         return True
 
-    def _on_message(self, msg: Any) -> None:
-        """Validate and cache one incoming `LowCmd_` message."""
-        if self._crc_helper is None:
-            return
-        if self._crc_helper.Crc(msg) != msg.crc:
-            LOGGER.warning("dropped `rt/lowcmd` message with invalid CRC")
-            return
+    def close(self) -> None:
+        """Release the localhost UDP socket."""
+        if self._socket is not None:
+            self._socket.close()
+        self._socket = None
+        self._transport_ready = False
 
-        motor_cmd = msg.motor_cmd
-        count = self._effective_motor_count(motor_cmd)
+    def poll(self) -> None:
+        """Consume any queued lowcmd packets from the sidecar."""
+        if not self.initialize() or self._socket is None:
+            return
+        while True:
+            try:
+                packet, _address = self._socket.recvfrom(65535)
+            except BlockingIOError:
+                return
+            self._on_packet(packet, time.monotonic())
+
+    def _on_packet(self, packet: bytes, received_at_monotonic: float) -> None:
+        """Cache one incoming localhost lowcmd packet."""
+        payload = decode_lowcmd_packet(packet)
+        positions = payload.get("joint_positions_dds", [])
+        velocities = payload.get("joint_velocities_dds", [])
+        torques = payload.get("joint_torques_dds", [])
+        kp_values = payload.get("joint_kp_dds", [])
+        kd_values = payload.get("joint_kd_dds", [])
+
+        count = self._effective_motor_count(positions)
         if count is None:
             return
         self._latest_command = LowCmdCache(
-            mode_pr=int(msg.mode_pr),
-            mode_machine=int(msg.mode_machine),
-            joint_positions_dds=tuple(float(motor_cmd[index].q) for index in range(count)),
-            joint_velocities_dds=tuple(float(motor_cmd[index].dq) for index in range(count)),
-            joint_torques_dds=tuple(float(motor_cmd[index].tau) for index in range(count)),
-            joint_kp_dds=tuple(float(motor_cmd[index].kp) for index in range(count)),
-            joint_kd_dds=tuple(float(motor_cmd[index].kd) for index in range(count)),
-            received_at_monotonic=time.monotonic(),
+            mode_pr=int(payload.get("mode_pr", 0)),
+            mode_machine=int(payload.get("mode_machine", 0)),
+            joint_positions_dds=tuple(float(positions[index]) for index in range(count)),
+            joint_velocities_dds=tuple(float(velocities[index]) for index in range(count)),
+            joint_torques_dds=tuple(float(torques[index]) for index in range(count)),
+            joint_kp_dds=tuple(float(kp_values[index]) for index in range(count)),
+            joint_kd_dds=tuple(float(kd_values[index]) for index in range(count)),
+            received_at_monotonic=received_at_monotonic,
         )
 
-    def _effective_motor_count(self, motor_cmd: Any) -> int | None:
+    def _effective_motor_count(self, motor_cmd: list[float] | tuple[float, ...]) -> int | None:
         incoming_count = len(motor_cmd)
         if incoming_count < BODY_JOINT_COUNT:
             self._warn_short_message(incoming_count)
