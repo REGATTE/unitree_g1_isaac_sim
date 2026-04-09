@@ -1,5 +1,66 @@
 # Dev Log
 
+Historical entries from the earlier implementation phase are preserved in
+[Agents/old/dev_log.md](old/dev_log.md).
+
+## 2026-04-08 20:05:00 MST
+
+- Re-read [Agents/implementation_plan_ros2.md](implementation_plan_ros2.md)
+  and kept work aligned with `Pre-Milestone 1`.
+- Confirmed the ROS 2 sidecar path now exposes:
+  - `/lowstate`
+  - `/lowcmd`
+- Continued hardening the sidecar bridge lifecycle after repeated local
+  restart failures.
+
+Bridge/runtime updates completed:
+
+- changed the default localhost UDP bridge ports from `5501/5502` to
+  `35501/35502`
+- added explicit socket cleanup for both:
+  - `src/dds/g1_lowstate.py`
+  - `src/dds/g1_lowcmd.py`
+- updated the DDS manager to clean up partial initialization state on
+  startup failure
+- updated the lowcmd bridge path to:
+  - bind before sidecar startup
+  - expose the actual bound port
+  - pass that bound port into the sidecar launch command
+- added a fallback path for the Isaac-side lowcmd UDP socket to use an
+  ephemeral localhost port if the configured port is still busy
+- added stale sidecar cleanup in `src/dds/manager.py`:
+  - scans for prior `scripts/ros2_cyclonedds_sidecar.py` processes
+  - terminates them before launching a new sidecar
+
+Documentation update:
+
+- rewrote `README.md` into a user-facing document
+- removed branch-progress tracking from the README
+- kept implementation status and branch details here in `Agents/dev_log.md`
+
+Validation completed:
+
+- `python3 -m unittest tests/test_config.py tests/test_dds_lowcmd.py tests/test_dds_manager.py`
+- `python3 -m py_compile src/config.py src/dds/g1_lowcmd.py src/dds/g1_lowstate.py src/dds/manager.py scripts/ros2_cyclonedds_sidecar.py`
+
+Status against `implementation_plan_ros2.md`:
+
+- `Pre-Milestone 1` remains in progress
+- the active runtime path is still free of `unitree_sdk2py`
+- the current work materially advances the transport replacement and
+  runtime robustness needed before Milestone 1 validation
+
+Next technical checks:
+
+- verify long-running `isaac_sim_python src/main.py --headless` startup is
+  stable across repeated restarts
+- verify live `/lowstate` streaming during runtime, not just topic
+  visibility
+- verify `/lowcmd` ingress drives bounded simulator motion
+- then begin Milestone 1 items:
+  - explicit outward quaternion `wxyz` validation
+  - real 500 Hz `lowstate` behavior
+
 ## 2026-04-08 19:50:02 MST
 
 - Branch context:

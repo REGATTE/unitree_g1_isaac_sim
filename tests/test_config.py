@@ -18,8 +18,8 @@ class ConfigDefaultsTests(unittest.TestCase):
         self.assertTrue(config.enable_dds)
         self.assertTrue(config.enable_lowcmd_subscriber)
         self.assertEqual(config.dds_domain_id, 1)
-        self.assertEqual(config.bridge_lowstate_port, 5501)
-        self.assertEqual(config.bridge_lowcmd_port, 5502)
+        self.assertEqual(config.bridge_lowstate_port, 35501)
+        self.assertEqual(config.bridge_lowcmd_port, 35502)
 
     def test_boolean_optional_flags_can_disable_default_dds_path(self):
         config = parse_config(["--no-enable-dds", "--no-enable-lowcmd-subscriber"])

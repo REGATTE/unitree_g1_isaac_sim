@@ -58,3 +58,9 @@ class G1LowStatePublisher:
             skipped_messages=self._stats.skipped_messages,
         )
         return True
+
+    def close(self) -> None:
+        """Release the localhost UDP socket."""
+        if self._socket is not None:
+            self._socket.close()
+        self._socket = None

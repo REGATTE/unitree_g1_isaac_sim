@@ -1,6 +1,7 @@
 import sys
 import time
 import unittest
+from unittest.mock import MagicMock, patch
 from pathlib import Path
 
 
@@ -15,8 +16,24 @@ from mapping.joints import BODY_JOINT_COUNT, G1_29DOF_JOINT_MAPPING
 
 
 class G1LowCmdSubscriberTests(unittest.TestCase):
+    def test_initialize_falls_back_when_configured_port_is_busy(self) -> None:
+        busy_port = 35502
+        subscriber = G1LowCmdSubscriber(bind_host="127.0.0.1", bind_port=busy_port)
+        fake_socket = MagicMock()
+        fake_socket.getsockname.return_value = ("127.0.0.1", 46000)
+        fake_socket.bind.side_effect = [
+            OSError(98, "Address already in use"),
+            None,
+        ]
+
+        with patch("dds.g1_lowcmd.socket.socket", return_value=fake_socket):
+            subscriber.initialize()
+            self.assertNotEqual(subscriber.bound_port, busy_port)
+            self.assertEqual(fake_socket.bind.call_args_list[0].args[0], ("127.0.0.1", busy_port))
+            self.assertEqual(fake_socket.bind.call_args_list[1].args[0], ("127.0.0.1", 0))
+
     def test_packet_is_clamped_to_body_joint_count(self) -> None:
-        subscriber = G1LowCmdSubscriber(bind_host="127.0.0.1", bind_port=5502)
+        subscriber = G1LowCmdSubscriber(bind_host="127.0.0.1", bind_port=35502)
         packet = encode_lowcmd_packet(
             mode_pr=7,
             mode_machine=11,
@@ -42,7 +59,7 @@ class G1LowCmdSubscriberTests(unittest.TestCase):
         self.assertEqual(len(sim_order.positions), BODY_JOINT_COUNT)
 
     def test_short_packets_are_rejected(self) -> None:
-        subscriber = G1LowCmdSubscriber(bind_host="127.0.0.1", bind_port=5502)
+        subscriber = G1LowCmdSubscriber(bind_host="127.0.0.1", bind_port=35502)
         packet = encode_lowcmd_packet(
             mode_pr=7,
             mode_machine=11,

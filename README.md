@@ -1,45 +1,26 @@
 # unitree_g1_isaac_sim
 
-This branch, `transition/unitree_ros2`, is focused on shifting the
-simulator's low-level integration path from `unitree_sdk2py` to
-`unitree_ros2`.
+Isaac Sim environment for the Unitree G1 with a ROS 2 / CycloneDDS bridge
+path for low-level state and command exchange.
 
-## Current Branch Goal
+This README is user-facing. Implementation progress and branch notes are
+tracked in [Agents/dev_log.md](Agents/dev_log.md).
 
-The immediate implementation target is the pre-Milestone 1 work in
-[Agents/implementation_plan_ros2.md](Agents/implementation_plan_ros2.md):
+## Overview
 
-- remove `unitree_sdk2py` runtime dependence from the simulator-facing
-  low-level path
-- replace message construction / parsing with the ROS 2-facing path
-- replace publisher / subscriber transport with the ROS 2 / CycloneDDS path
-- replace manual CRC handling if the ROS 2 path no longer requires it
+The current low-level integration path uses:
 
-## Current Architecture
+- Isaac Sim for robot state extraction and command application
+- a localhost sidecar bridge for ROS 2 message I/O
+- `unitree_ros2` message definitions (`unitree_hg`)
+- CycloneDDS as the ROS 2 middleware
 
-The current transition implementation now uses a sidecar bridge:
+The intended external flow is:
 
-- Isaac Sim process:
-  - extracts robot state
-  - applies incoming commands
-  - communicates with a localhost bridge over UDP
-- ROS 2 sidecar process:
-  - runs on system Python
-  - publishes `/lowstate`
-  - subscribes `/lowcmd`
-  - uses `unitree_hg` messages from the built `unitree_ros2` workspace
-- CycloneDDS / ROS 2 middleware:
-  - carries the external low-level contract visible to `unitree_ros2`
-    and downstream ROS 2 applications
+- simulator state out: Isaac Sim -> ROS 2 / CycloneDDS -> ROS 2 apps
+- command ingress: ROS 2 apps -> ROS 2 / CycloneDDS -> Isaac Sim
 
-This keeps the external target architecture intact:
-
-- Isaac Sim -> CycloneDDS -> `unitree_ros2` -> ROS 2 applications
-
-The sidecar exists only to avoid the Python runtime mismatch between
-Isaac Sim and the local ROS 2 Humble Python environment.
-
-## Architecture Diagram
+## Architecture
 
 ```text
                       State Path
@@ -49,19 +30,18 @@ Isaac Sim and the local ROS 2 Humble Python environment.
   |                   |                          | (system Python)         |
   | - read robot      |                          | - unitree_hg/LowState   |
   |   state           |                          | - rclpy publisher       |
-  | - reorder to DDS  |                          | - CycloneDDS via ROS 2  |
-  | - build lowstate  |                          +------------+------------+
+  | - map to DDS      |                          | - CycloneDDS via ROS 2  |
+  | - send lowstate   |                          +------------+------------+
   +-------------------+                                       |
                                                               v
                                                     +----------------------+
-                                                    | CycloneDDS / ROS 2   |
-                                                    | middleware layer     |
+                                                    | ROS 2 / CycloneDDS   |
                                                     +----------+-----------+
                                                                |
                                                                v
                                                     +----------------------+
-                                                    | unitree_ros2         |
-                                                    | ROS 2 apps           |
+                                                    | unitree_ros2 /       |
+                                                    | ROS 2 applications   |
                                                     +----------------------+
 
 
@@ -71,50 +51,112 @@ Isaac Sim and the local ROS 2 Humble Python environment.
   | Isaac Sim Runtime | <----------------------- | ROS 2 Sidecar Bridge    |
   |                   |                          | (system Python)         |
   | - receive lowcmd  |                          | - unitree_hg/LowCmd     |
-  | - remap DDS order |                          | - rclpy subscriber      |
-  |   to sim order    |                          | - CycloneDDS via ROS 2  |
+  | - remap to sim    |                          | - rclpy subscriber      |
+  |   joint order     |                          | - CycloneDDS via ROS 2  |
   | - apply commands  |                          +------------+------------+
   +-------------------+                                       ^
                                                               |
                                                     +---------+------------+
-                                                    | unitree_ros2         |
-                                                    | ROS 2 apps           |
+                                                    | unitree_ros2 /       |
+                                                    | ROS 2 applications   |
                                                     +----------------------+
 ```
 
-## Current Status
+## Requirements
 
-Current progress against `implementation_plan_ros2.md`:
+- Isaac Sim 5.x installed and runnable through `isaac_sim_python`
+- ROS 2 Humble available on the host
+- `unitree_ros2` built locally, with the install prefix available
+- CycloneDDS middleware available through ROS 2
 
-- `Pre-Milestone 1` is in progress
-- the active runtime path no longer depends on `unitree_sdk2py`
-- the sidecar now exposes ROS 2 topics:
-  - `/lowstate`
-  - `/lowcmd`
+Expected local `unitree_ros2` install prefix:
 
-What is still pending before Milestone 1:
+- `~/Workspaces/unitree_ros2/cyclonedds_ws/install`
 
-- stabilize sidecar runtime / shutdown behavior fully
-- verify live `lowstate` data flow end-to-end
-- verify live `lowcmd` ingress end-to-end
-- then implement Milestone 1 compatibility work:
-  - outward IMU quaternion `wxyz`
-  - real 500 Hz `lowstate`
+You can also override that path with:
 
-## Documentation Split
+- `UNITREE_ROS2_INSTALL_PREFIX`
+- `--unitree-ros2-install-prefix`
 
-- This `README.md` is now the active branch README for the
-  `unitree_ros2` transition work.
-- The previous SDK2-oriented documentation has been preserved in
-  [README_unitree_sdk2py.md](README_unitree_sdk2py.md).
+## Runtime Notes
 
-## Next Steps
+- Isaac Sim and ROS 2 Humble use different Python runtimes on this setup.
+  Because of that, ROS 2 runs in a sidecar process rather than in the Isaac
+  Sim Python process.
+- The localhost UDP bridge defaults are:
+  - lowstate: `127.0.0.1:35501`
+  - lowcmd: `127.0.0.1:35502`
+- Startup attempts to clean up stale sidecar bridge processes from prior runs
+  before launching a fresh bridge.
 
-The next implementation steps on this branch are:
+## Launch
 
-1. keep the ROS 2 sidecar alive cleanly during runtime and shutdown
-2. verify live `/lowstate` and `/lowcmd` traffic end-to-end
-3. then proceed into Milestone 1 compatibility work:
-   - `wxyz` outward quaternion layout
-   - real 500 Hz `lowstate`
-   - high-frequency `lowstate` and `/lowcmd` only
+Run the simulator:
+
+```bash
+isaac_sim_python src/main.py --headless
+```
+
+Optional useful flags:
+
+```bash
+isaac_sim_python src/main.py --headless --max-frames 300
+isaac_sim_python src/main.py --headless --dds-domain-id 1
+isaac_sim_python src/main.py --headless --unitree-ros2-install-prefix ~/Workspaces/unitree_ros2/cyclonedds_ws/install
+```
+
+## ROS 2 Verification
+
+In another terminal:
+
+```bash
+source /opt/ros/humble/setup.bash
+source ~/Workspaces/unitree_ros2/cyclonedds_ws/install/setup.bash
+export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+export ROS_DOMAIN_ID=1
+```
+
+List topics:
+
+```bash
+ros2 topic list
+```
+
+Expected topics include:
+
+- `/lowstate`
+- `/lowcmd`
+
+Inspect lowstate:
+
+```bash
+ros2 topic echo /lowstate
+```
+
+Publish a simple lowcmd smoke-test message:
+
+```bash
+ros2 topic pub --once /lowcmd unitree_hg/msg/LowCmd "{mode_pr: 0, mode_machine: 0}"
+```
+
+## Configuration
+
+Useful runtime options:
+
+- `--enable-dds` / `--no-enable-dds`
+- `--dds-domain-id`
+- `--lowstate-topic`
+- `--lowcmd-topic`
+- `--lowstate-publish-hz`
+- `--unitree-ros2-install-prefix`
+- `--ros2-python-exe`
+- `--bridge-bind-host`
+- `--bridge-lowstate-port`
+- `--bridge-lowcmd-port`
+
+## Documentation
+
+- active implementation notes: [Agents/dev_log.md](Agents/dev_log.md)
+- archived historical dev log: [Agents/old/dev_log.md](Agents/old/dev_log.md)
+- implementation plan: [Agents/implementation_plan_ros2.md](Agents/implementation_plan_ros2.md)
+- previous SDK-oriented documentation: [README_unitree_sdk2py.md](README_unitree_sdk2py.md)

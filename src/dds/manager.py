@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import math
 import os
 from pathlib import Path
+import signal
 import subprocess
 import time
 
@@ -114,18 +115,22 @@ class DdsManager:
             )
             return False
 
-        self._start_sidecar_bridge()
-        self._lowstate_publisher.initialize()
-        if self._config.enable_lowcmd_subscriber:
-            self._lowcmd_subscriber.initialize()
-        else:
-            LOGGER.info("lowcmd subscriber disabled for this run")
-        self._sdk_enabled = True
-        LOGGER.info(
-            "initialized localhost DDS sidecar bridge (domain_id=%s)",
-            self._config.dds_domain_id,
-        )
-        return True
+        try:
+            if self._config.enable_lowcmd_subscriber:
+                self._lowcmd_subscriber.initialize()
+            else:
+                LOGGER.info("lowcmd subscriber disabled for this run")
+            self._start_sidecar_bridge()
+            self._lowstate_publisher.initialize()
+            self._sdk_enabled = True
+            LOGGER.info(
+                "initialized localhost DDS sidecar bridge (domain_id=%s)",
+                self._config.dds_domain_id,
+            )
+            return True
+        except Exception:
+            self.shutdown()
+            raise
 
     def step(self, simulation_time_seconds: float, snapshot: RobotKinematicSnapshot) -> DdsStepResult:
         """Run one DDS update from the main simulation loop.
@@ -169,6 +174,8 @@ class DdsManager:
                 self._bridge_process.kill()
                 self._bridge_process.wait(timeout=5.0)
         self._bridge_process = None
+        self._lowstate_publisher.close()
+        self._lowcmd_subscriber.close()
         self._lowstate_publisher = G1LowStatePublisher(
             host=self._config.bridge_bind_host,
             port=self._config.bridge_lowstate_port,
@@ -238,6 +245,7 @@ class DdsManager:
         install_prefix = Path(self._config.unitree_ros2_install_prefix)
         sidecar_script = Path(__file__).resolve().parents[2] / "scripts" / "ros2_cyclonedds_sidecar.py"
         ros2_python_exe = self._config.ros2_python_exe or "/usr/bin/python3"
+        self._cleanup_stale_sidecars(sidecar_script)
         clean_env = {
             key: value
             for key, value in os.environ.items()
@@ -258,7 +266,7 @@ class DdsManager:
             f"--lowcmd-topic '{self._config.lowcmd_topic}' "
             f"--bind-host '{self._config.bridge_bind_host}' "
             f"--lowstate-port {self._config.bridge_lowstate_port} "
-            f"--lowcmd-port {self._config.bridge_lowcmd_port}"
+            f"--lowcmd-port {self._lowcmd_subscriber.bound_port}"
         )
         self._bridge_process = subprocess.Popen(
             ["bash", "-lc", command],
@@ -270,6 +278,77 @@ class DdsManager:
             self._bridge_process.pid,
             install_prefix,
         )
+
+    def _cleanup_stale_sidecars(self, sidecar_script: Path) -> None:
+        """Terminate leftover sidecar bridge processes from prior runs."""
+        candidate_pids = self._find_stale_sidecar_pids(sidecar_script)
+        if not candidate_pids:
+            return
+
+        LOGGER.warning(
+            "terminating %s stale ROS 2 sidecar bridge process(es) before startup: %s",
+            len(candidate_pids),
+            ", ".join(str(pid) for pid in candidate_pids),
+        )
+        for pid in candidate_pids:
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except ProcessLookupError:
+                continue
+
+        deadline = time.monotonic() + 2.0
+        remaining = set(candidate_pids)
+        while remaining and time.monotonic() < deadline:
+            time.sleep(0.05)
+            remaining = {pid for pid in remaining if self._pid_exists(pid)}
+
+        for pid in sorted(remaining):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                continue
+
+    def _find_stale_sidecar_pids(self, sidecar_script: Path) -> list[int]:
+        """Return PIDs for matching sidecar scripts that predate this manager."""
+        try:
+            result = subprocess.run(
+                ["ps", "-eo", "pid=,args="],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return []
+
+        sidecar_token = str(sidecar_script)
+        current_pid = os.getpid()
+        active_bridge_pid = self._bridge_process.pid if self._bridge_process is not None else None
+        pids: list[int] = []
+        for line in result.stdout.splitlines():
+            stripped = line.strip()
+            if not stripped or sidecar_token not in stripped:
+                continue
+            pid_text, _, command = stripped.partition(" ")
+            if sidecar_token not in command:
+                continue
+            try:
+                pid = int(pid_text)
+            except ValueError:
+                continue
+            if pid == current_pid or pid == active_bridge_pid:
+                continue
+            pids.append(pid)
+        return pids
+
+    @staticmethod
+    def _pid_exists(pid: int) -> bool:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
 
 
 def _compute_publish_period(publish_hz: float) -> float:

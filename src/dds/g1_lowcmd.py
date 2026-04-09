@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import errno
 from functools import lru_cache
 import socket
 import time
@@ -72,16 +73,43 @@ class G1LowCmdSubscriber:
         """Discard any previously received lowcmd sample."""
         self._latest_command = None
 
+    @property
+    def bound_port(self) -> int:
+        """Return the currently bound UDP port, if initialized."""
+        if self._socket is None:
+            return self._bind_port
+        return int(self._socket.getsockname()[1])
+
     def initialize(self) -> bool:
         """Bind the localhost UDP socket used by the sidecar bridge."""
         if self._transport_ready:
             return True
         self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self._socket.bind((self._bind_host, self._bind_port))
+        self._socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            self._socket.bind((self._bind_host, self._bind_port))
+        except OSError as exc:
+            if exc.errno != errno.EADDRINUSE or self._bind_port == 0:
+                self._socket.close()
+                self._socket = None
+                raise
+            LOGGER.warning(
+                "lowcmd UDP port %s is already in use on %s; falling back to an ephemeral localhost port.",
+                self._bind_port,
+                self._bind_host,
+            )
+            self._socket.bind((self._bind_host, 0))
         self._socket.setblocking(False)
         self._transport_ready = True
-        LOGGER.info("lowcmd UDP subscriber ready on %s:%s", self._bind_host, self._bind_port)
+        LOGGER.info("lowcmd UDP subscriber ready on %s:%s", self._bind_host, self.bound_port)
         return True
+
+    def close(self) -> None:
+        """Release the localhost UDP socket."""
+        if self._socket is not None:
+            self._socket.close()
+        self._socket = None
+        self._transport_ready = False
 
     def poll(self) -> None:
         """Consume any queued lowcmd packets from the sidecar."""

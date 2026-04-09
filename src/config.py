@@ -243,13 +243,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--bridge-lowstate-port",
         type=int,
-        default=5501,
+        default=35501,
         help="UDP port used for Isaac Sim -> sidecar lowstate packets.",
     )
     parser.add_argument(
         "--bridge-lowcmd-port",
         type=int,
-        default=5502,
+        default=35502,
         help="UDP port used for sidecar -> Isaac Sim lowcmd packets.",
     )
     return parser

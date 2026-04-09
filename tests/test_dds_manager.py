@@ -1,6 +1,8 @@
+import os
 import sys
 import time
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 
@@ -18,6 +20,7 @@ class _FakeLowCmdSubscriber:
     def __init__(self, latest_command=None):
         self.latest_command = latest_command
         self.clear_calls = 0
+        self.bound_port = 35502
 
     def poll(self):
         return None
@@ -26,14 +29,26 @@ class _FakeLowCmdSubscriber:
         self.latest_command = None
         self.clear_calls += 1
 
+    def initialize(self):
+        return True
+
+    def close(self):
+        return None
+
 
 class _FakeLowStatePublisher:
     def __init__(self):
         self.publish_calls = 0
 
+    def initialize(self):
+        return True
+
     def publish(self, snapshot):
         self.publish_calls += 1
         return True
+
+    def close(self):
+        return None
 
 
 def _build_config(**overrides) -> AppConfig:
@@ -62,8 +77,8 @@ def _build_config(**overrides) -> AppConfig:
         unitree_ros2_install_prefix=None,
         ros2_python_exe="/usr/bin/python3",
         bridge_bind_host="127.0.0.1",
-        bridge_lowstate_port=5501,
-        bridge_lowcmd_port=5502,
+        bridge_lowstate_port=35501,
+        bridge_lowcmd_port=35502,
     )
     if not overrides:
         return config
@@ -187,6 +202,25 @@ class DdsManagerTests(unittest.TestCase):
         self.assertEqual(manager._next_lowstate_publish_time, 0.0)
         self.assertIsNone(manager._cadence.window_start_time)
         self.assertEqual(manager._cadence.publish_count, 0)
+
+    def test_find_stale_sidecar_pids_filters_current_processes(self):
+        manager = DdsManager(_build_config())
+        sidecar_script = REPO_ROOT / "scripts" / "ros2_cyclonedds_sidecar.py"
+        manager._bridge_process = type("Proc", (), {"pid": 22222, "poll": lambda self: None})()
+        ps_output = "\n".join(
+            [
+                f"{os.getpid()} /usr/bin/python3 {sidecar_script}",
+                f"22222 /usr/bin/python3 {sidecar_script}",
+                f"33333 /usr/bin/python3 {sidecar_script}",
+                "44444 /usr/bin/python3 some_other_script.py",
+            ]
+        )
+
+        with patch("dds.manager.subprocess.run") as run_mock:
+            run_mock.return_value.stdout = ps_output
+            stale = manager._find_stale_sidecar_pids(sidecar_script)
+
+        self.assertEqual(stale, [33333])
 
 
 if __name__ == "__main__":

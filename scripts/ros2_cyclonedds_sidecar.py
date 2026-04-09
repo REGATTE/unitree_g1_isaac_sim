@@ -42,6 +42,7 @@ class Ros2CycloneDdsSidecar(Node):
         self.create_subscription(LowCmd, lowcmd_topic, self._on_lowcmd, 32)
 
         self._recv_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._recv_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._recv_socket.bind((bind_host, lowstate_port))
         self._recv_socket.setblocking(False)
 
@@ -122,6 +123,9 @@ def main(argv: list[str] | None = None) -> int:
                 rclpy.spin_once(node, timeout_sec=0.01)
                 node.poll_once()
             except Exception as exc:
+                message = str(exc)
+                if "context is invalid" in message or "rcl_shutdown already called" in message:
+                    break
                 print(f"ROS 2 sidecar stopping after runtime error: {exc}", file=sys.stderr)
                 exit_code = 1
                 break
