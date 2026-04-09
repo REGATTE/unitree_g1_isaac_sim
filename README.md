@@ -1,6 +1,15 @@
 # unitree_g1_isaac_sim
 A unitree G1 based simulation, to mimic the Cyclone DDS layer, on IsaacSim. 
 
+## Transition Note
+
+This repository is shifting toward `unitree_ros2` integration instead of
+`unitree_sdk2py` for the simulator-facing client workflow.
+
+The README is still being updated to reflect that transition.
+Until that cleanup is complete, some sections below still describe the
+older `unitree_sdk2py`-based setup and validation flow.
+
 ## Setup
 
 ### Setup Isaac Sim Paths

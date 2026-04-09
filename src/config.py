@@ -143,10 +143,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--enable-dds",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help=(
             "Enable the Cyclone DDS bridge so external Unitree SDK or ROS 2 "
-            "clients can treat the simulator like a real robot."
+            "clients can treat the simulator like a real robot. Enabled by default."
         ),
     )
     parser.add_argument(
@@ -175,10 +176,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--enable-lowcmd-subscriber",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help=(
             "Create the `rt/lowcmd` subscriber and apply accepted body commands "
-            "into the live articulation."
+            "into the live articulation. Enabled by default."
         ),
     )
     parser.add_argument(

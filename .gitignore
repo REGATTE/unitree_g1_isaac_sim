@@ -212,3 +212,5 @@ tmp/*
 # added later during local tooling experiments.
 !tests/
 !tests/**/*.py
+
+.codex
