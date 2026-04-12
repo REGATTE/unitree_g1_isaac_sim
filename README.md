@@ -111,6 +111,28 @@ isaac_sim_python src/main.py --headless --dds-domain-id 1
 isaac_sim_python src/main.py --headless --unitree-ros2-install-prefix ~/Workspaces/unitree_ros2/cyclonedds_ws/install
 ```
 
+The active viewport camera follows the robot by default. Disable it when you
+want to control the Isaac Sim viewport manually:
+
+```bash
+isaac_sim_python src/main.py --no-enable-follow-camera
+```
+
+Launch with the default optional world:
+
+```bash
+isaac_sim_python src/main.py --use-world true
+```
+
+Launch with a specific world USD:
+
+```bash
+isaac_sim_python src/main.py --use-world true --world-path /path/to/world.usd
+```
+
+If `--use-world` is omitted or set to `false`, the simulator keeps the
+lightweight default stage with a ground plane.
+
 ## ROS 2 Verification
 
 In another terminal:
@@ -166,21 +188,15 @@ The simulator-side cadence log is useful when you want to compare:
 
 ## Configuration
 
-Useful runtime options:
+Runtime defaults are defined in `src/config.py` and exposed as CLI arguments
+to `src/main.py`.
 
-- `--enable-dds` / `--no-enable-dds`
-- `--dds-domain-id`
-- `--lowstate-topic`
-- `--lowcmd-topic`
-- `--lowstate-publish-hz`
-- `--unitree-ros2-install-prefix`
-- `--ros2-python-exe`
-- `--bridge-bind-host`
-- `--bridge-lowstate-port`
-- `--bridge-lowcmd-port`
+The full configuration reference, including world-loading arguments, is in
+[config.md](config.md).
 
 ## Documentation
 
+- configuration reference: [config.md](config.md)
 - active implementation notes: [Agents/dev_log.md](Agents/dev_log.md)
 - implementation plan: [Agents/implementation_plan_ros2.md](Agents/implementation_plan_ros2.md)
 - previous SDK-oriented documentation: [README_unitree_sdk2py.md](README_unitree_sdk2py.md)
