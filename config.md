@@ -49,6 +49,11 @@ isaac_sim_python src/main.py --use-world
 | `--use-world` | `false` | Enables optional world USD loading. Accepts `true` or `false`; no value means `true`. | `isaac_sim_python src/main.py --use-world true` |
 | `--world-path` | `Models/world/Hospital_World.usd` | World USD path used only when `--use-world` is enabled. | `isaac_sim_python src/main.py --use-world true --world-path Models/world/Hospital_World.usd` |
 | `--world-prim-path` | `/World/Environment` | Prim path where the optional world USD is referenced. | `isaac_sim_python src/main.py --use-world true --world-prim-path /World/Environment` |
+| `--enable-follow-camera` / `--no-enable-follow-camera` | `true` | Enables or disables the active viewport camera that follows the robot base. | `isaac_sim_python src/main.py --no-enable-follow-camera` |
+| `--follow-camera-prim-path` | `/World/FollowCamera` | Prim path for the camera that follows the robot. | `isaac_sim_python src/main.py --follow-camera-prim-path /World/FollowCamera` |
+| `--follow-camera-distance` | `4.0` | Distance in meters behind the robot for the follow camera. | `isaac_sim_python src/main.py --follow-camera-distance 5.0` |
+| `--follow-camera-height` | `0.6` | Height offset in meters above the robot base for the follow camera. | `isaac_sim_python src/main.py --follow-camera-height 1.8` |
+| `--follow-camera-target-height` | `0.3` | Height offset in meters above the robot base that the follow camera looks at. | `isaac_sim_python src/main.py --follow-camera-target-height 1.0` |
 | `--physics-dt` | `0.002` | Physics timestep in seconds. Must be positive and finite. | `isaac_sim_python src/main.py --physics-dt 0.002` |
 | `--headless` | `false` | Runs Isaac Sim without the GUI window. | `isaac_sim_python src/main.py --headless` |
 | `--renderer` | `RayTracedLighting` | Renderer passed into `SimulationApp`. | `isaac_sim_python src/main.py --renderer RayTracedLighting` |
@@ -81,4 +86,6 @@ isaac_sim_python src/main.py --use-world
   validation runs only when `--use-world` is enabled.
 - When `--use-world` is disabled, `src/scene.py` creates the default ground
   plane. When enabled, the world USD is referenced at `--world-prim-path`.
+- The follow camera uses the robot base pose from the same kinematic snapshot
+  path used by DDS state publication, so it still follows when DDS is disabled.
 - `--lowstate-publish-hz` must not exceed `1 / --physics-dt`.

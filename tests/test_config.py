@@ -23,6 +23,11 @@ class ConfigDefaultsTests(unittest.TestCase):
         self.assertFalse(config.use_world)
         self.assertEqual(config.world_path, DEFAULT_WORLD_PATH)
         self.assertEqual(config.world_prim_path, "/World/Environment")
+        self.assertTrue(config.enable_follow_camera)
+        self.assertEqual(config.follow_camera_prim_path, "/World/FollowCamera")
+        self.assertEqual(config.follow_camera_distance, 4.0)
+        self.assertEqual(config.follow_camera_height, 0.6)
+        self.assertEqual(config.follow_camera_target_height, 0.3)
         self.assertEqual(config.lowstate_publish_hz, 500.0)
         self.assertEqual(config.lowcmd_max_position_delta_rad, 0.25)
         self.assertEqual(config.bridge_lowstate_port, 35501)
@@ -51,6 +56,30 @@ class ConfigDefaultsTests(unittest.TestCase):
 
         self.assertTrue(config.use_world)
         self.assertEqual(config.world_path, Path("/tmp/world.usd"))
+
+    def test_follow_camera_can_be_disabled(self):
+        config = parse_config(["--no-enable-follow-camera"])
+
+        self.assertFalse(config.enable_follow_camera)
+
+    def test_follow_camera_offsets_can_be_overridden(self):
+        config = parse_config(
+            [
+                "--follow-camera-prim-path",
+                "/World/CameraRig/Follow",
+                "--follow-camera-distance",
+                "4.5",
+                "--follow-camera-height",
+                "2.0",
+                "--follow-camera-target-height",
+                "1.1",
+            ]
+        )
+
+        self.assertEqual(config.follow_camera_prim_path, "/World/CameraRig/Follow")
+        self.assertEqual(config.follow_camera_distance, 4.5)
+        self.assertEqual(config.follow_camera_height, 2.0)
+        self.assertEqual(config.follow_camera_target_height, 1.1)
 
     def test_unitree_ros2_install_prefix_can_be_provided_explicitly(self):
         config = parse_config(["--unitree-ros2-install-prefix", "/tmp"])
