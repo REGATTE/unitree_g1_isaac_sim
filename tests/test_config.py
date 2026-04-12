@@ -32,12 +32,37 @@ class ConfigDefaultsTests(unittest.TestCase):
         self.assertEqual(config.lowcmd_max_position_delta_rad, 0.25)
         self.assertEqual(config.bridge_lowstate_port, 35501)
         self.assertEqual(config.bridge_lowcmd_port, 35502)
+        self.assertTrue(config.enable_livox_lidar)
+        self.assertEqual(config.livox_lidar_topic, "livox/lidar")
+        self.assertEqual(config.livox_lidar_frame_id, "mid360_link")
+        self.assertEqual(config.livox_lidar_parent_link_name, "torso_link")
 
     def test_boolean_optional_flags_can_disable_default_dds_path(self):
         config = parse_config(["--no-enable-dds", "--no-enable-lowcmd-subscriber"])
 
         self.assertFalse(config.enable_dds)
         self.assertFalse(config.enable_lowcmd_subscriber)
+
+    def test_livox_lidar_can_be_disabled_and_overridden(self):
+        config = parse_config(
+            [
+                "--no-enable-livox-lidar",
+                "--livox-lidar-topic",
+                "points",
+                "--livox-lidar-frame-id",
+                "custom_mid360",
+                "--livox-lidar-rtx-config",
+                "none",
+                "--livox-lidar-rtx-variant",
+                "none",
+            ]
+        )
+
+        self.assertFalse(config.enable_livox_lidar)
+        self.assertEqual(config.livox_lidar_topic, "points")
+        self.assertEqual(config.livox_lidar_frame_id, "custom_mid360")
+        self.assertEqual(config.livox_lidar_rtx_config, "none")
+        self.assertEqual(config.livox_lidar_rtx_variant, "none")
 
     def test_world_can_be_enabled_with_explicit_true_false_value(self):
         enabled = parse_config(["--use-world", "true"])

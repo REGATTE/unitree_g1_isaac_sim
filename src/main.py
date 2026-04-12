@@ -24,6 +24,7 @@ from robot_state import (
 )
 from runtime_logging import configure_logging, get_logger
 from scene import build_scene
+from sensors.livox_mid360 import setup_livox_mid360
 
 LOGGER = get_logger("main")
 
@@ -169,6 +170,7 @@ def main() -> int:
         if world_path is not None:
             LOGGER.info("world_path=%s", world_path)
         build_scene(asset_path, config, world_path)
+        setup_livox_mid360(config)
         camera_controller = FollowCameraController(config) if config.enable_follow_camera else None
         if camera_controller is not None:
             camera_controller.initialize()

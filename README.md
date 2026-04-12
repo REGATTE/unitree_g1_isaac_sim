@@ -12,6 +12,7 @@ The current low-level integration path uses:
 
 - Isaac Sim for robot state extraction and command application
 - a localhost sidecar bridge for ROS 2 message I/O
+- Isaac's native ROS 2 bridge for high-bandwidth simulated sensor topics
 - `unitree_ros2` message definitions (`unitree_hg`)
 - CycloneDDS as the ROS 2 middleware
 
@@ -19,6 +20,7 @@ The intended external flow is:
 
 - simulator state out: Isaac Sim -> ROS 2 / CycloneDDS -> ROS 2 apps
 - command ingress: ROS 2 apps -> ROS 2 / CycloneDDS -> Isaac Sim
+- simulated LiDAR out: Isaac RTX LiDAR -> Isaac ROS 2 bridge -> ROS 2 apps
 
 ## Architecture
 
@@ -60,6 +62,18 @@ The intended external flow is:
                                                     | unitree_ros2 /       |
                                                     | ROS 2 applications   |
                                                     +----------------------+
+
+
+                  Simulated MID360 LiDAR Path
+
+  +-------------------+       Isaac ROS 2 bridge     +----------------------+
+  | Isaac RTX LiDAR   | ---------------------------> | ROS 2 PointCloud2    |
+  |                   |                              | /livox/lidar         |
+  | - MID360-like     |                              | frame_id=mid360_link |
+  |   scan attributes |                              +----------------------+
+  | - URDF-matched    |
+  |   mount frame     |
+  +-------------------+
 ```
 
 ## Requirements
@@ -91,6 +105,10 @@ You can also override that path with:
   - lowcmd: `127.0.0.1:35502`
 - Startup attempts to clean up stale sidecar bridge processes from prior runs
   before launching a fresh bridge.
+- A simulated Livox MID360 RTX LiDAR is enabled by default. It mounts at the
+  URDF `torso_link -> mid360_link` transform and publishes `PointCloud2` on
+  `/livox/lidar` through Isaac's ROS 2 bridge, not through the LowState /
+  LowCmd sidecar.
 - The runtime now logs two separate lowstate cadence diagnostics:
   - `simulation_time`: cadence against the physics schedule
   - `wall_clock`: realized publish cadence against host time
@@ -108,6 +126,8 @@ Optional useful flags:
 ```bash
 isaac_sim_python src/main.py --headless --max-frames 300
 isaac_sim_python src/main.py --headless --dds-domain-id 1
+isaac_sim_python src/main.py --headless --livox-lidar-topic livox/lidar
+isaac_sim_python src/main.py --headless --no-enable-livox-lidar
 isaac_sim_python src/main.py --headless --unitree-ros2-install-prefix ~/Workspaces/unitree_ros2/cyclonedds_ws/install
 ```
 
@@ -154,6 +174,7 @@ Expected topics include:
 
 - `/rt/lowstate`
 - `/rt/lowcmd`
+- `/livox/lidar`
 
 Inspect lowstate:
 
@@ -172,6 +193,18 @@ Check the external lowstate rate from ROS 2:
 ```bash
 ros2 topic hz /rt/lowstate
 ```
+
+Inspect the simulated MID360 point cloud:
+
+```bash
+ros2 topic info /livox/lidar
+ros2 topic echo /livox/lidar --once
+```
+
+The simulated MID360 is an Isaac RTX LiDAR approximation of the non-repetitive
+Livox scan pattern. It uses `frame_id=mid360_link`, matching the URDF frame
+published by `g1_robot`. Keep ROS 2 sourced before launching Isaac Sim so the
+Isaac ROS 2 bridge can publish the topic.
 
 Current runtime expectation:
 

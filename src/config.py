@@ -74,6 +74,14 @@ class AppConfig:
     bridge_bind_host: str
     bridge_lowstate_port: int
     bridge_lowcmd_port: int
+    enable_livox_lidar: bool = True
+    livox_lidar_topic: str = "livox/lidar"
+    livox_lidar_frame_id: str = "mid360_link"
+    livox_lidar_parent_link_name: str = "torso_link"
+    livox_lidar_prim_name: str = "mid360_link"
+    livox_lidar_sensor_prim_name: str = "mid360_rtx_lidar"
+    livox_lidar_rtx_config: str = "OS1"
+    livox_lidar_rtx_variant: str = "OS1_REV6_32ch20hz1024res"
     use_world: bool = False
     world_path: Path = DEFAULT_WORLD_PATH
     world_prim_path: str = "/World/Environment"
@@ -354,6 +362,70 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=35502,
         help="UDP port used for sidecar -> Isaac Sim lowcmd packets.",
     )
+    parser.add_argument(
+        "--enable-livox-lidar",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Create an Isaac RTX LiDAR that approximates the inverted Livox "
+            "MID360 and publishes PointCloud2 through the Isaac ROS 2 bridge. "
+            "Enabled by default."
+        ),
+    )
+    parser.add_argument(
+        "--livox-lidar-topic",
+        type=str,
+        default="livox/lidar",
+        help="ROS 2 PointCloud2 topic for the simulated MID360 LiDAR.",
+    )
+    parser.add_argument(
+        "--livox-lidar-frame-id",
+        type=str,
+        default="mid360_link",
+        help="Frame id used in the simulated MID360 PointCloud2 messages.",
+    )
+    parser.add_argument(
+        "--livox-lidar-parent-link-name",
+        type=str,
+        default="torso_link",
+        help=(
+            "USD prim name to search for when mounting the simulated MID360. "
+            "The default mirrors the URDF mid360_joint parent."
+        ),
+    )
+    parser.add_argument(
+        "--livox-lidar-prim-name",
+        type=str,
+        default="mid360_link",
+        help=(
+            "USD Xform name created under the parent link for the simulated "
+            "MID360 frame. The default mirrors the URDF child link."
+        ),
+    )
+    parser.add_argument(
+        "--livox-lidar-sensor-prim-name",
+        type=str,
+        default="mid360_rtx_lidar",
+        help="USD prim name for the RTX LiDAR sensor under the MID360 frame.",
+    )
+    parser.add_argument(
+        "--livox-lidar-rtx-config",
+        type=str,
+        default="OS1",
+        help=(
+            "Base Isaac RTX LiDAR config used for the MID360 approximation. "
+            "Use 'none' to create a generic OmniLidar with only explicit attributes."
+        ),
+    )
+    parser.add_argument(
+        "--livox-lidar-rtx-variant",
+        type=str,
+        default="OS1_REV6_32ch20hz1024res",
+        help=(
+            "RTX LiDAR config variant used with --livox-lidar-rtx-config. "
+            "Use 'none' to pass no variant."
+        ),
+    )
     return parser
 
 
@@ -398,6 +470,15 @@ def parse_config(argv: list[str] | None = None) -> AppConfig:
         )
     if args.lowcmd_max_position_delta_rad < 0.0 or not math.isfinite(args.lowcmd_max_position_delta_rad):
         parser.error("--lowcmd-max-position-delta-rad must be a finite non-negative float.")
+    for label, value in (
+        ("--livox-lidar-topic", args.livox_lidar_topic),
+        ("--livox-lidar-frame-id", args.livox_lidar_frame_id),
+        ("--livox-lidar-parent-link-name", args.livox_lidar_parent_link_name),
+        ("--livox-lidar-prim-name", args.livox_lidar_prim_name),
+        ("--livox-lidar-sensor-prim-name", args.livox_lidar_sensor_prim_name),
+    ):
+        if not value.strip():
+            parser.error(f"{label} cannot be empty.")
     return AppConfig(
         robot_variant=args.robot_variant,
         asset_path=args.asset_path,
@@ -434,4 +515,12 @@ def parse_config(argv: list[str] | None = None) -> AppConfig:
         bridge_bind_host=args.bridge_bind_host,
         bridge_lowstate_port=args.bridge_lowstate_port,
         bridge_lowcmd_port=args.bridge_lowcmd_port,
+        enable_livox_lidar=args.enable_livox_lidar,
+        livox_lidar_topic=args.livox_lidar_topic,
+        livox_lidar_frame_id=args.livox_lidar_frame_id,
+        livox_lidar_parent_link_name=args.livox_lidar_parent_link_name,
+        livox_lidar_prim_name=args.livox_lidar_prim_name,
+        livox_lidar_sensor_prim_name=args.livox_lidar_sensor_prim_name,
+        livox_lidar_rtx_config=args.livox_lidar_rtx_config,
+        livox_lidar_rtx_variant=args.livox_lidar_rtx_variant,
     )
