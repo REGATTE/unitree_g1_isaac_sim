@@ -9,7 +9,7 @@ SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from config import parse_config, resolve_unitree_ros2_install_prefix
+from config import DEFAULT_WORLD_PATH, parse_config, resolve_unitree_ros2_install_prefix
 
 
 class ConfigDefaultsTests(unittest.TestCase):
@@ -20,6 +20,9 @@ class ConfigDefaultsTests(unittest.TestCase):
         self.assertTrue(config.enable_lowcmd_subscriber)
         self.assertEqual(config.dds_domain_id, 1)
         self.assertAlmostEqual(config.physics_dt, 1.0 / 500.0)
+        self.assertFalse(config.use_world)
+        self.assertEqual(config.world_path, DEFAULT_WORLD_PATH)
+        self.assertEqual(config.world_prim_path, "/World/Environment")
         self.assertEqual(config.lowstate_publish_hz, 500.0)
         self.assertEqual(config.lowcmd_max_position_delta_rad, 0.25)
         self.assertEqual(config.bridge_lowstate_port, 35501)
@@ -30,6 +33,24 @@ class ConfigDefaultsTests(unittest.TestCase):
 
         self.assertFalse(config.enable_dds)
         self.assertFalse(config.enable_lowcmd_subscriber)
+
+    def test_world_can_be_enabled_with_explicit_true_false_value(self):
+        enabled = parse_config(["--use-world", "true"])
+        disabled = parse_config(["--use-world", "false"])
+
+        self.assertTrue(enabled.use_world)
+        self.assertFalse(disabled.use_world)
+
+    def test_world_can_be_enabled_without_value(self):
+        config = parse_config(["--use-world"])
+
+        self.assertTrue(config.use_world)
+
+    def test_world_path_can_be_overridden(self):
+        config = parse_config(["--use-world", "true", "--world-path", "/tmp/world.usd"])
+
+        self.assertTrue(config.use_world)
+        self.assertEqual(config.world_path, Path("/tmp/world.usd"))
 
     def test_unitree_ros2_install_prefix_can_be_provided_explicitly(self):
         config = parse_config(["--unitree-ros2-install-prefix", "/tmp"])

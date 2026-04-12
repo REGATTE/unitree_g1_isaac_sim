@@ -11,6 +11,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MODELS_ROOT = PROJECT_ROOT / "Models" / "USD"
+DEFAULT_WORLD_PATH = PROJECT_ROOT / "Models" / "world" / "Hospital_World.usd"
 DEFAULT_VARIANT = "29dof"
 DEFAULT_ASSET_BY_VARIANT = {
     "23dof": MODELS_ROOT / "23dof" / "usd" / "g1_23dof_rev_1_0" / "g1_23dof_rev_1_0.usd",
@@ -24,6 +25,16 @@ def positive_finite_float(value: str) -> float:
     if not math.isfinite(parsed) or parsed <= 0.0:
         raise argparse.ArgumentTypeError(f"expected a positive finite float, got {value!r}")
     return parsed
+
+
+def parse_bool(value: str) -> bool:
+    """Parse a CLI bool argument from common true/false spellings."""
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "t", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "f", "no", "n", "off"}:
+        return False
+    raise argparse.ArgumentTypeError(f"expected true or false, got {value!r}")
 
 
 @dataclass(frozen=True)
@@ -55,6 +66,9 @@ class AppConfig:
     bridge_bind_host: str
     bridge_lowstate_port: int
     bridge_lowcmd_port: int
+    use_world: bool = False
+    world_path: Path = DEFAULT_WORLD_PATH
+    world_prim_path: str = "/World/Environment"
 
     def resolve_asset_path(self) -> Path:
         asset_path = self.asset_path or DEFAULT_ASSET_BY_VARIANT[self.robot_variant]
@@ -62,6 +76,14 @@ class AppConfig:
         if not asset_path.exists():
             raise FileNotFoundError(f"Robot USD asset does not exist: {asset_path}")
         return asset_path
+
+    def resolve_world_path(self) -> Path | None:
+        if not self.use_world:
+            return None
+        world_path = self.world_path.expanduser().resolve()
+        if not world_path.exists():
+            raise FileNotFoundError(f"World USD asset does not exist: {world_path}")
+        return world_path
 
     @property
     def simulation_app_config(self) -> dict[str, object]:
@@ -98,6 +120,29 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=float,
         default=0.8,
         help="Spawn height for the robot root prim in meters.",
+    )
+    parser.add_argument(
+        "--use-world",
+        type=parse_bool,
+        nargs="?",
+        const=True,
+        default=False,
+        help=(
+            "Reference the configured world USD into the stage. Accepts true/false; "
+            "passing --use-world without a value is treated as true."
+        ),
+    )
+    parser.add_argument(
+        "--world-path",
+        type=Path,
+        default=DEFAULT_WORLD_PATH,
+        help="World USD path used when --use-world true is set.",
+    )
+    parser.add_argument(
+        "--world-prim-path",
+        type=str,
+        default="/World/Environment",
+        help="Prim path where the optional world USD will be referenced.",
     )
     parser.add_argument(
         "--physics-dt",
@@ -312,6 +357,9 @@ def parse_config(argv: list[str] | None = None) -> AppConfig:
         asset_path=args.asset_path,
         robot_prim_path=args.robot_prim_path,
         robot_height=args.robot_height,
+        use_world=args.use_world,
+        world_path=args.world_path,
+        world_prim_path=args.world_prim_path,
         physics_dt=args.physics_dt,
         headless=args.headless,
         renderer=args.renderer,

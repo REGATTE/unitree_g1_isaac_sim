@@ -152,6 +152,7 @@ def main() -> int:
 
     try:
         asset_path = config.resolve_asset_path()
+        world_path = config.resolve_world_path()
     except FileNotFoundError as exc:
         LOGGER.error("%s", exc)
         return 1
@@ -160,7 +161,9 @@ def main() -> int:
     try:
         LOGGER.info("project_root=%s", PROJECT_ROOT)
         LOGGER.info("asset_path=%s", asset_path)
-        build_scene(asset_path, config)
+        if world_path is not None:
+            LOGGER.info("world_path=%s", world_path)
+        build_scene(asset_path, config, world_path)
         world = create_world(config)
         state_reader = initialize_robot_state_reader(config)
         dds_manager = DdsManager(config) if config.enable_dds else None
