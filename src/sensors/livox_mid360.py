@@ -1,10 +1,12 @@
-"""Isaac RTX LiDAR setup for the G1-mounted Livox MID360.
+"""Isaac LiDAR setup for the G1-mounted Livox MID360.
 
 The real robot ROS 2 path launches ``livox_ros_driver2`` directly and publishes
 ``sensor_msgs/msg/PointCloud2`` with ``frame_id=mid360_link``. This module keeps
-the simulator aligned with that contract by publishing from Isaac's ROS 2 RTX
-LiDAR helper directly, instead of routing point clouds through the Unitree
-LowState / LowCmd sidecar bridge.
+the simulator aligned with that contract by publishing a direct ROS 2
+``PointCloud2`` from Isaac, instead of routing point clouds through the Unitree
+LowState / LowCmd sidecar bridge. The current live data path uses PhysX scene
+raycasts because Isaac Sim 5.1's RTX/Replicator LiDAR writer path currently
+fails in this environment while setting OmniGraph array attributes.
 
 The MID360 scan attributes are an approximation adapted from a public NVIDIA
 forum snippet for Isaac Sim 5.0. Livox does not currently ship an official
@@ -19,6 +21,8 @@ import os
 from dataclasses import dataclass
 from typing import Any
 import sys
+
+import numpy as np
 
 from config import AppConfig
 from runtime_logging import get_logger
@@ -124,20 +128,178 @@ class LivoxMid360Setup:
     sensor_prim_path: str
     topic_name: str
     frame_id: str
+    publisher: "LivoxMid360RosPublisher | None" = None
+
+
+class LivoxMid360RosPublisher:
+    """Publish a MID360-like PhysX raycast point cloud as ROS 2 PointCloud2."""
+
+    def __init__(
+        self,
+        *,
+        sensor_frame_prim_path: str,
+        robot_prim_path: str,
+        topic_name: str,
+        frame_id: str,
+        publish_hz: float,
+    ) -> None:
+        import omni.physx
+        import omni.usd
+        import rclpy
+        from rclpy.qos import qos_profile_sensor_data
+        from sensor_msgs.msg import PointCloud2
+
+        normalized_topic = "/" + _strip_ros_topic_prefix(topic_name)
+        self._rclpy = rclpy
+        self._stage = omni.usd.get_context().get_stage()
+        self._scene_query = omni.physx.get_physx_scene_query_interface()
+        self._sensor_frame_prim_path = sensor_frame_prim_path
+        self._robot_prim_path = robot_prim_path.rstrip("/")
+        self._topic_name = normalized_topic
+        self._frame_id = frame_id
+        self._publish_period_seconds = 1.0 / publish_hz
+        self._next_publish_time_seconds = 0.0
+        self._last_data_warning_time_seconds = -math.inf
+        self._first_publish_logged = False
+        self._scan_index = 0
+        self._points_per_scan = max(
+            1,
+            int(
+                round(
+                    float(MID360_RTX_ATTRIBUTES["omni:sensor:Core:reportRateBaseHz"])
+                    / float(MID360_RTX_ATTRIBUTES["omni:sensor:Core:scanRateBaseHz"])
+                )
+            ),
+        )
+        self._near_range_m = float(MID360_RTX_ATTRIBUTES["omni:sensor:Core:nearRangeM"])
+        self._far_range_m = float(MID360_RTX_ATTRIBUTES["omni:sensor:Core:farRangeM"])
+        self._elevations_rad = np.deg2rad(
+            np.asarray(
+                MID360_RTX_ATTRIBUTES["omni:sensor:Core:emitterState:s001:elevationDeg"],
+                dtype=np.float64,
+            )
+        )
+        self._owns_rclpy_context = not rclpy.ok()
+        if self._owns_rclpy_context:
+            rclpy.init(args=None)
+
+        self._node = rclpy.create_node("unitree_g1_livox_mid360_sim")
+        self._publisher = self._node.create_publisher(PointCloud2, normalized_topic, qos_profile_sensor_data)
+        LOGGER.info(
+            "created direct Livox MID360 ROS 2 publisher node=%s topic='%s' frame_id='%s' "
+            "source=physx_raycast points_per_scan=%s publish_hz=%.3f near_range=%.3fm far_range=%.3fm",
+            self._node.get_name(),
+            normalized_topic,
+            frame_id,
+            self._points_per_scan,
+            publish_hz,
+            self._near_range_m,
+            self._far_range_m,
+        )
+
+    def step(self, simulation_time_seconds: float) -> None:
+        """Publish the latest full-scan point cloud if the publish period elapsed."""
+        if simulation_time_seconds + 1e-12 < self._next_publish_time_seconds:
+            return
+
+        points = self._raycast_scan()
+        if points.size == 0:
+            self._log_no_data(simulation_time_seconds, "PhysX raycasts did not hit any collision geometry")
+            return
+
+        self._publisher.publish(_make_point_cloud2(points, self._frame_id, simulation_time_seconds))
+        self._rclpy.spin_once(self._node, timeout_sec=0.0)
+        self._next_publish_time_seconds = simulation_time_seconds + self._publish_period_seconds
+        self._scan_index += 1
+        if not self._first_publish_logged:
+            self._first_publish_logged = True
+            LOGGER.info(
+                "Livox MID360 published first PointCloud2 message topic='%s' frame_id='%s' points=%s stamp=%.6f",
+                self._topic_name,
+                self._frame_id,
+                points.shape[0],
+                simulation_time_seconds,
+            )
+
+    def shutdown(self) -> None:
+        """Tear down the ROS node."""
+        try:
+            if hasattr(self, "_node"):
+                self._node.destroy_node()
+            if self._owns_rclpy_context and self._rclpy.ok():
+                self._rclpy.shutdown()
+        except Exception:
+            LOGGER.exception("failed to shutdown Livox MID360 ROS 2 publisher")
+
+    def _raycast_scan(self) -> np.ndarray:
+        from pxr import Gf, UsdGeom
+
+        sensor_prim = self._stage.GetPrimAtPath(self._sensor_frame_prim_path)
+        if not sensor_prim or not sensor_prim.IsValid():
+            return np.empty((0, 3), dtype=np.float32)
+
+        sensor_to_world = UsdGeom.Xformable(sensor_prim).ComputeLocalToWorldTransform(0.0)
+        world_to_sensor = sensor_to_world.GetInverse()
+        origin_world = sensor_to_world.Transform(Gf.Vec3d(0.0, 0.0, 0.0))
+        points: list[tuple[float, float, float]] = []
+        golden_angle = math.pi * (3.0 - math.sqrt(5.0))
+        start_ray = self._scan_index * self._points_per_scan
+
+        for ray_index in range(self._points_per_scan):
+            absolute_ray_index = start_ray + ray_index
+            elevation = float(self._elevations_rad[absolute_ray_index % len(self._elevations_rad)])
+            azimuth = (absolute_ray_index * golden_angle) % (2.0 * math.pi)
+
+            # MID360 is mounted inverted on this G1, so the vertical fan is flipped
+            # relative to the sensor profile. This keeps the simulated returns in
+            # the same practical direction as the robot-mounted unit.
+            direction_sensor = Gf.Vec3d(
+                math.cos(elevation) * math.cos(azimuth),
+                math.cos(elevation) * math.sin(azimuth),
+                -math.sin(elevation),
+            )
+            direction_world = sensor_to_world.Transform(direction_sensor) - origin_world
+            if direction_world.GetLength() <= 0.0:
+                continue
+            direction_world.Normalize()
+            ray_origin_world = origin_world + direction_world * self._near_range_m
+
+            hit = self._scene_query.raycast_closest(
+                Gf.Vec3f(ray_origin_world),
+                Gf.Vec3f(direction_world),
+                self._far_range_m - self._near_range_m,
+            )
+            if not hit.get("hit", False):
+                continue
+            collision_path = str(hit.get("collision", ""))
+            if collision_path.startswith(self._robot_prim_path + "/"):
+                continue
+            hit_world = hit["position"]
+            hit_sensor = world_to_sensor.Transform(Gf.Vec3d(hit_world.x, hit_world.y, hit_world.z))
+            points.append((float(hit_sensor[0]), float(hit_sensor[1]), float(hit_sensor[2])))
+
+        if not points:
+            return np.empty((0, 3), dtype=np.float32)
+        return np.asarray(points, dtype=np.float32)
+
+    def _log_no_data(self, simulation_time_seconds: float, reason: str) -> None:
+        if simulation_time_seconds - self._last_data_warning_time_seconds < 2.0:
+            return
+        self._last_data_warning_time_seconds = simulation_time_seconds
+        LOGGER.warning("Livox MID360 point cloud not published yet: %s", reason)
 
 
 def setup_livox_mid360(config: AppConfig) -> LivoxMid360Setup | None:
-    """Create the simulated MID360 and attach a ROS 2 PointCloud2 writer."""
+    """Create the simulated MID360 and attach a ROS 2 PointCloud2 publisher."""
     if not config.enable_livox_lidar:
         LOGGER.info("simulated Livox MID360 LiDAR disabled")
         return None
 
     import omni
-    import omni.replicator.core as rep
     import omni.usd
     from pxr import Gf, Sdf, UsdGeom
 
-    _prepare_isaac_ros2_bridge_environment()
+    _prepare_isaac_ros2_bridge_environment(config.dds_domain_id)
     _enable_extension("isaacsim.sensors.rtx")
     _enable_extension("isaacsim.ros2.bridge")
 
@@ -174,12 +336,12 @@ def setup_livox_mid360(config: AppConfig) -> LivoxMid360Setup | None:
         **MID360_RTX_ATTRIBUTES,
     )
 
-    hydra_texture = rep.create.render_product(sensor.GetPath(), resolution=(128, 128), name="MID360")
-    omni.kit.app.get_app().update()
-    _create_ros2_point_cloud_graph(
-        render_product_path=hydra_texture.path,
+    publisher = LivoxMid360RosPublisher(
+        sensor_frame_prim_path=frame_prim_path,
+        robot_prim_path=config.robot_prim_path,
         topic_name=config.livox_lidar_topic,
         frame_id=config.livox_lidar_frame_id,
+        publish_hz=float(MID360_RTX_ATTRIBUTES["omni:sensor:Core:scanRateBaseHz"]),
     )
 
     setup = LivoxMid360Setup(
@@ -187,14 +349,45 @@ def setup_livox_mid360(config: AppConfig) -> LivoxMid360Setup | None:
         sensor_prim_path=str(sensor.GetPath()),
         topic_name=config.livox_lidar_topic,
         frame_id=config.livox_lidar_frame_id,
+        publisher=publisher,
     )
     LOGGER.info(
-        "created simulated Livox MID360 RTX LiDAR at %s; publishing PointCloud2 on '/%s' with frame_id='%s'",
+        "created simulated Livox MID360 LiDAR at %s; publishing PointCloud2 on '/%s' with frame_id='%s'",
         setup.sensor_prim_path,
         _strip_ros_topic_prefix(setup.topic_name),
         setup.frame_id,
     )
     return setup
+
+
+def _make_point_cloud2(points: np.ndarray, frame_id: str, stamp_seconds: float):
+    from sensor_msgs.msg import PointCloud2, PointField
+    from std_msgs.msg import Header
+
+    stamp_sec = int(stamp_seconds)
+    stamp_nanosec = int((stamp_seconds - stamp_sec) * 1_000_000_000)
+    contiguous_points = np.ascontiguousarray(points, dtype=np.float32)
+
+    header = Header()
+    header.stamp.sec = stamp_sec
+    header.stamp.nanosec = stamp_nanosec
+    header.frame_id = frame_id
+
+    message = PointCloud2()
+    message.header = header
+    message.height = 1
+    message.width = int(contiguous_points.shape[0])
+    message.fields = [
+        PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1),
+        PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1),
+        PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1),
+    ]
+    message.is_bigendian = False
+    message.point_step = 12
+    message.row_step = message.point_step * message.width
+    message.data = contiguous_points.tobytes()
+    message.is_dense = True
+    return message
 
 
 def _enable_extension(extension_id: str) -> None:
@@ -204,46 +397,7 @@ def _enable_extension(extension_id: str) -> None:
     if not manager.is_extension_enabled(extension_id):
         manager.set_extension_enabled_immediate(extension_id, True)
 
-
-def _create_ros2_point_cloud_graph(
-    *,
-    render_product_path: str,
-    topic_name: str,
-    frame_id: str,
-) -> None:
-    """Publish RTX LiDAR output through the ROS 2 bridge helper node.
-
-    Isaac Sim 5.1's Replicator writer registry can fail in headless mode while
-    setting an empty render-product resolution array. The bridge helper node is
-    the lower-level graph path used by Isaac's own RTX sensor tests and avoids
-    that writer attach path.
-    """
-    import omni.graph.core as og
-
-    og.Controller.edit(
-        {"graph_path": "/ActionGraph/LivoxMid360Lidar", "evaluator_name": "execution"},
-        {
-            og.Controller.Keys.CREATE_NODES: [
-                ("OnPlaybackTick", "omni.graph.action.OnPlaybackTick"),
-                ("PointCloudPublish", "isaacsim.ros2.bridge.ROS2RtxLidarHelper"),
-            ],
-            og.Controller.Keys.SET_VALUES: [
-                ("PointCloudPublish.inputs:renderProductPath", render_product_path),
-                ("PointCloudPublish.inputs:topicName", _strip_ros_topic_prefix(topic_name)),
-                ("PointCloudPublish.inputs:type", "point_cloud"),
-                ("PointCloudPublish.inputs:frameId", frame_id),
-                ("PointCloudPublish.inputs:resetSimulationTimeOnStop", True),
-                ("PointCloudPublish.inputs:fullScan", True),
-                ("PointCloudPublish.inputs:useSystemTime", False),
-            ],
-            og.Controller.Keys.CONNECT: [
-                ("OnPlaybackTick.outputs:tick", "PointCloudPublish.inputs:execIn"),
-            ],
-        },
-    )
-
-
-def _prepare_isaac_ros2_bridge_environment() -> None:
+def _prepare_isaac_ros2_bridge_environment(domain_id: int) -> None:
     """Keep Isaac's Python 3.11 ROS bridge away from sourced ROS 3.10 paths."""
     bridge_humble_root = _find_isaac_ros2_bridge_humble_root()
     if bridge_humble_root is not None:
@@ -252,6 +406,7 @@ def _prepare_isaac_ros2_bridge_environment() -> None:
 
     os.environ.setdefault("ROS_DISTRO", "humble")
     os.environ["RMW_IMPLEMENTATION"] = "rmw_cyclonedds_cpp"
+    os.environ["ROS_DOMAIN_ID"] = str(domain_id)
 
     python_path_entries = os.environ.get("PYTHONPATH", "").split(os.pathsep)
     filtered_entries = [
@@ -269,9 +424,16 @@ def _prepare_isaac_ros2_bridge_environment() -> None:
         ]
         LOGGER.info(
             "removed %s ROS Python 3.10 path(s) before enabling Isaac ROS 2 bridge; "
-            "using RMW_IMPLEMENTATION=%s",
+            "using RMW_IMPLEMENTATION=%s ROS_DOMAIN_ID=%s",
             removed_count,
             os.environ["RMW_IMPLEMENTATION"],
+            os.environ["ROS_DOMAIN_ID"],
+        )
+    else:
+        LOGGER.info(
+            "prepared Isaac ROS 2 bridge environment with RMW_IMPLEMENTATION=%s ROS_DOMAIN_ID=%s",
+            os.environ["RMW_IMPLEMENTATION"],
+            os.environ["ROS_DOMAIN_ID"],
         )
 
 

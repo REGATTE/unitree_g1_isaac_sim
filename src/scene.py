@@ -60,7 +60,10 @@ def build_scene(asset_path: Path, config: AppConfig, world_path: Path | None = N
     physics_scene.CreateGravityMagnitudeAttr().Set(9.81)
 
     LOGGER.info("creating physics context")
-    PhysicsContext(physics_dt=config.physics_dt, prim_path="/World/PhysicsScene")
+    physics_context = PhysicsContext(physics_dt=config.physics_dt, prim_path="/World/PhysicsScene")
+    if config.enable_livox_lidar:
+        physics_context.set_enable_scene_query_support(True)
+        LOGGER.info("enabled PhysX scene query support for simulated Livox MID360 raycasts")
     if world_path is None:
         LOGGER.info("creating ground plane")
         GroundPlane(prim_path="/World/GroundPlane", z_position=0.0)
