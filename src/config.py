@@ -27,6 +27,14 @@ def positive_finite_float(value: str) -> float:
     return parsed
 
 
+def non_negative_finite_float(value: str) -> float:
+    """Parse a CLI float argument that must be finite and non-negative."""
+    parsed = float(value)
+    if not math.isfinite(parsed) or parsed < 0.0:
+        raise argparse.ArgumentTypeError(f"expected a non-negative finite float, got {value!r}")
+    return parsed
+
+
 def parse_bool(value: str) -> bool:
     """Parse a CLI bool argument from common true/false spellings."""
     normalized = value.strip().lower()
@@ -69,6 +77,11 @@ class AppConfig:
     use_world: bool = False
     world_path: Path = DEFAULT_WORLD_PATH
     world_prim_path: str = "/World/Environment"
+    enable_follow_camera: bool = True
+    follow_camera_prim_path: str = "/World/FollowCamera"
+    follow_camera_distance: float = 4.0
+    follow_camera_height: float = 0.6
+    follow_camera_target_height: float = 0.3
 
     def resolve_asset_path(self) -> Path:
         asset_path = self.asset_path or DEFAULT_ASSET_BY_VARIANT[self.robot_variant]
@@ -143,6 +156,39 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=str,
         default="/World/Environment",
         help="Prim path where the optional world USD will be referenced.",
+    )
+    parser.add_argument(
+        "--enable-follow-camera",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Keep the active viewport camera following the robot base. "
+            "Enabled by default."
+        ),
+    )
+    parser.add_argument(
+        "--follow-camera-prim-path",
+        type=str,
+        default="/World/FollowCamera",
+        help="Prim path for the camera that follows the robot.",
+    )
+    parser.add_argument(
+        "--follow-camera-distance",
+        type=positive_finite_float,
+        default=4.0,
+        help="Distance in meters behind the robot for the follow camera.",
+    )
+    parser.add_argument(
+        "--follow-camera-height",
+        type=positive_finite_float,
+        default=0.6,
+        help="Height offset in meters above the robot base for the follow camera.",
+    )
+    parser.add_argument(
+        "--follow-camera-target-height",
+        type=non_negative_finite_float,
+        default=0.3,
+        help="Height offset in meters above the robot base that the follow camera looks at.",
     )
     parser.add_argument(
         "--physics-dt",
@@ -360,6 +406,11 @@ def parse_config(argv: list[str] | None = None) -> AppConfig:
         use_world=args.use_world,
         world_path=args.world_path,
         world_prim_path=args.world_prim_path,
+        enable_follow_camera=args.enable_follow_camera,
+        follow_camera_prim_path=args.follow_camera_prim_path,
+        follow_camera_distance=args.follow_camera_distance,
+        follow_camera_height=args.follow_camera_height,
+        follow_camera_target_height=args.follow_camera_target_height,
         physics_dt=args.physics_dt,
         headless=args.headless,
         renderer=args.renderer,

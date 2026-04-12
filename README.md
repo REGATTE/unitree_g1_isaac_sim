@@ -111,6 +111,13 @@ isaac_sim_python src/main.py --headless --dds-domain-id 1
 isaac_sim_python src/main.py --headless --unitree-ros2-install-prefix ~/Workspaces/unitree_ros2/cyclonedds_ws/install
 ```
 
+The active viewport camera follows the robot by default. Disable it when you
+want to control the Isaac Sim viewport manually:
+
+```bash
+isaac_sim_python src/main.py --no-enable-follow-camera
+```
+
 Launch with the default optional world:
 
 ```bash

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 
+from camera import FollowCameraController
 from config import PROJECT_ROOT, AppConfig, parse_config
 from dds import DdsManager
 from mapping import log_joint_validation_report, to_dds_ordered_snapshot, validate_live_joint_order
@@ -80,6 +81,7 @@ def run_main_loop(
     state_reader: RobotStateReader,
     dds_manager: DdsManager | None,
     command_applier: RobotCommandApplier | None,
+    camera_controller: FollowCameraController | None,
 ) -> None:
     """Advance the simulator until the app closes or the frame cap is reached."""
 
@@ -100,12 +102,15 @@ def run_main_loop(
                 perform_runtime_reset(world, state_reader, dds_manager)
                 simulation_time_seconds = 0.0
                 reset_triggered = True
-            if dds_manager is not None:
+            snapshot = None
+            if dds_manager is not None or camera_controller is not None:
                 try:
                     snapshot = state_reader.read_kinematic_snapshot(sample_dt=physics_dt)
                 except PhysicsViewUnavailableError:
                     snapshot = None
-                if snapshot is not None:
+                if snapshot is not None and camera_controller is not None:
+                    camera_controller.update(snapshot)
+                if snapshot is not None and dds_manager is not None:
                     dds_manager.step(simulation_time_seconds, snapshot)
             if max_frames > 0 and frame_count >= max_frames:
                 break
@@ -164,8 +169,16 @@ def main() -> int:
         if world_path is not None:
             LOGGER.info("world_path=%s", world_path)
         build_scene(asset_path, config, world_path)
+        camera_controller = FollowCameraController(config) if config.enable_follow_camera else None
+        if camera_controller is not None:
+            camera_controller.initialize()
         world = create_world(config)
         state_reader = initialize_robot_state_reader(config)
+        if camera_controller is not None:
+            try:
+                camera_controller.update(state_reader.read_kinematic_snapshot(sample_dt=config.physics_dt))
+            except PhysicsViewUnavailableError:
+                LOGGER.warning("initial follow camera update skipped because robot physics view is unavailable")
         dds_manager = DdsManager(config) if config.enable_dds else None
         command_applier = (
             RobotCommandApplier(
@@ -187,6 +200,7 @@ def main() -> int:
             state_reader,
             dds_manager,
             command_applier,
+            camera_controller,
         )
     except Exception:
         LOGGER.exception("fatal error during startup/runtime")
