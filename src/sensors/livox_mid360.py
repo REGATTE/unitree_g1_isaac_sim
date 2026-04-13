@@ -17,15 +17,18 @@ navigation-development model rather than a sensor-calibration authority.
 from __future__ import annotations
 
 import math
-import os
 from dataclasses import dataclass
 from typing import Any
-import sys
 
 import numpy as np
 
 from config import AppConfig
+from ros2_bridge_runtime import (
+    is_incompatible_ros_python_path as _is_incompatible_ros_python_path,
+    prepare_isaac_ros2_bridge_environment as _prepare_isaac_ros2_bridge_environment,
+)
 from runtime_logging import get_logger
+from sim_clock import seconds_to_ros_time_msg
 
 
 LOGGER = get_logger("sensors.livox_mid360")
@@ -364,13 +367,10 @@ def _make_point_cloud2(points: np.ndarray, frame_id: str, stamp_seconds: float):
     from sensor_msgs.msg import PointCloud2, PointField
     from std_msgs.msg import Header
 
-    stamp_sec = int(stamp_seconds)
-    stamp_nanosec = int((stamp_seconds - stamp_sec) * 1_000_000_000)
     contiguous_points = np.ascontiguousarray(points, dtype=np.float32)
 
     header = Header()
-    header.stamp.sec = stamp_sec
-    header.stamp.nanosec = stamp_nanosec
+    header.stamp = seconds_to_ros_time_msg(stamp_seconds)
     header.frame_id = frame_id
 
     message = PointCloud2()
@@ -396,78 +396,6 @@ def _enable_extension(extension_id: str) -> None:
     manager = omni.kit.app.get_app().get_extension_manager()
     if not manager.is_extension_enabled(extension_id):
         manager.set_extension_enabled_immediate(extension_id, True)
-
-def _prepare_isaac_ros2_bridge_environment(domain_id: int) -> None:
-    """Keep Isaac's Python 3.11 ROS bridge away from sourced ROS 3.10 paths."""
-    bridge_humble_root = _find_isaac_ros2_bridge_humble_root()
-    if bridge_humble_root is not None:
-        bridge_lib = bridge_humble_root / "lib"
-        _prepend_env_path("LD_LIBRARY_PATH", str(bridge_lib))
-
-    os.environ.setdefault("ROS_DISTRO", "humble")
-    os.environ["RMW_IMPLEMENTATION"] = "rmw_cyclonedds_cpp"
-    os.environ["ROS_DOMAIN_ID"] = str(domain_id)
-
-    python_path_entries = os.environ.get("PYTHONPATH", "").split(os.pathsep)
-    filtered_entries = [
-        entry
-        for entry in python_path_entries
-        if entry and not _is_incompatible_ros_python_path(entry)
-    ]
-    removed_count = len([entry for entry in python_path_entries if entry]) - len(filtered_entries)
-    if removed_count:
-        os.environ["PYTHONPATH"] = os.pathsep.join(filtered_entries)
-        sys.path[:] = [
-            entry
-            for entry in sys.path
-            if not _is_incompatible_ros_python_path(entry)
-        ]
-        LOGGER.info(
-            "removed %s ROS Python 3.10 path(s) before enabling Isaac ROS 2 bridge; "
-            "using RMW_IMPLEMENTATION=%s ROS_DOMAIN_ID=%s",
-            removed_count,
-            os.environ["RMW_IMPLEMENTATION"],
-            os.environ["ROS_DOMAIN_ID"],
-        )
-    else:
-        LOGGER.info(
-            "prepared Isaac ROS 2 bridge environment with RMW_IMPLEMENTATION=%s ROS_DOMAIN_ID=%s",
-            os.environ["RMW_IMPLEMENTATION"],
-            os.environ["ROS_DOMAIN_ID"],
-        )
-
-
-def _find_isaac_ros2_bridge_humble_root():
-    from pathlib import Path
-
-    try:
-        import isaacsim.ros2.bridge as ros2_bridge
-    except ImportError:
-        return None
-    bridge_file = Path(ros2_bridge.__file__).resolve()
-    extension_root = bridge_file.parents[3]
-    humble_root = extension_root / "humble"
-    return humble_root if humble_root.exists() else None
-
-
-def _is_incompatible_ros_python_path(path_value: str) -> bool:
-    normalized = path_value.replace("\\", "/")
-    return (
-        "/python3.10/" in normalized
-        and (
-            normalized.startswith("/opt/ros/")
-            or "/Workspaces/ros2_ws/install/" in normalized
-            or "/Workspaces/unitree_ros2/" in normalized
-        )
-    )
-
-
-def _prepend_env_path(name: str, value: str) -> None:
-    entries = [entry for entry in os.environ.get(name, "").split(os.pathsep) if entry]
-    if value in entries:
-        return
-    os.environ[name] = os.pathsep.join([value, *entries])
-
 
 def _find_parent_prim(stage, robot_prim_path: str, parent_link_name: str):
     robot_prim = stage.GetPrimAtPath(robot_prim_path)
