@@ -54,9 +54,13 @@ def prepare_isaac_ros2_bridge_environment(domain_id: int) -> None:
 
 def enable_isaac_ros2_bridge_extension() -> None:
     """Enable Isaac's ROS 2 bridge extension before importing ROS Python modules."""
+    enable_isaac_extension("isaacsim.ros2.bridge")
+
+
+def enable_isaac_extension(extension_id: str) -> None:
+    """Enable an Isaac extension by id if it is not already active."""
     import omni.kit.app
 
-    extension_id = "isaacsim.ros2.bridge"
     manager = omni.kit.app.get_app().get_extension_manager()
     if not manager.is_extension_enabled(extension_id):
         manager.set_extension_enabled_immediate(extension_id, True)

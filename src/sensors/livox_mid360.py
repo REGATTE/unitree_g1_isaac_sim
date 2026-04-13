@@ -24,6 +24,8 @@ import numpy as np
 
 from config import AppConfig
 from ros2_bridge_runtime import (
+    enable_isaac_extension as _enable_isaac_extension,
+    enable_isaac_ros2_bridge_extension as _enable_isaac_ros2_bridge_extension,
     is_incompatible_ros_python_path as _is_incompatible_ros_python_path,
     prepare_isaac_ros2_bridge_environment as _prepare_isaac_ros2_bridge_environment,
 )
@@ -266,8 +268,8 @@ def setup_livox_mid360(config: AppConfig) -> LivoxMid360Setup | None:
     from pxr import Gf, Sdf, UsdGeom
 
     _prepare_isaac_ros2_bridge_environment(config.dds_domain_id)
-    _enable_extension("isaacsim.sensors.rtx")
-    _enable_extension("isaacsim.ros2.bridge")
+    _enable_isaac_extension("isaacsim.sensors.rtx")
+    _enable_isaac_ros2_bridge_extension()
 
     stage = omni.usd.get_context().get_stage()
     parent_prim = _find_parent_prim(stage, config.robot_prim_path, config.livox_lidar_parent_link_name)
@@ -380,13 +382,6 @@ def _iter_mid360_scan_angles(
             emitted += 1
 
 
-def _enable_extension(extension_id: str) -> None:
-    import omni.kit.app
-
-    manager = omni.kit.app.get_app().get_extension_manager()
-    if not manager.is_extension_enabled(extension_id):
-        manager.set_extension_enabled_immediate(extension_id, True)
-
 def _find_parent_prim(stage, robot_prim_path: str, parent_link_name: str):
     robot_prim = stage.GetPrimAtPath(robot_prim_path)
     if not robot_prim or not robot_prim.IsValid():
@@ -397,9 +392,10 @@ def _find_parent_prim(stage, robot_prim_path: str, parent_link_name: str):
     if exact_prim and exact_prim.IsValid():
         return exact_prim
 
-    for prim in stage.Traverse():
-        path = str(prim.GetPath())
-        if not path.startswith(robot_prim_path.rstrip("/") + "/"):
+    from pxr import Usd
+
+    for prim in Usd.PrimRange(robot_prim):
+        if prim == robot_prim:
             continue
         if prim.GetName() == parent_link_name:
             return prim

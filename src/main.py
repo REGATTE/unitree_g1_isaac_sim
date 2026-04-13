@@ -78,7 +78,6 @@ def run_main_loop(
     world,
     max_frames: int,
     headless: bool,
-    render_in_headless: bool,
     physics_dt: float,
     reset_after_frames: int,
     state_reader: RobotStateReader,
@@ -93,9 +92,7 @@ def run_main_loop(
     frame_count = 0
     simulation_time_seconds = 0.0
     reset_triggered = False
-    render_enabled = (not headless) or render_in_headless
-    if headless and render_enabled:
-        LOGGER.info("headless render steps enabled by runtime configuration")
+    render_enabled = not headless
     try:
         while simulation_app.is_running():
             # Apply the latest cached low-level command before stepping physics
@@ -210,7 +207,6 @@ def main() -> int:
             world,
             config.max_frames,
             config.headless,
-            False,
             config.physics_dt,
             config.reset_after_frames,
             state_reader,
