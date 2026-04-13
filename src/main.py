@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import logging
 
-from camera import FollowCameraController
 from config import PROJECT_ROOT, AppConfig, parse_config
 from dds import DdsManager
 from mapping import log_joint_validation_report, to_dds_ordered_snapshot, validate_live_joint_order
@@ -25,7 +24,8 @@ from robot_state import (
 from runtime_logging import configure_logging, get_logger
 from scene import build_scene
 from sensors.livox_mid360 import LivoxMid360RosPublisher, setup_livox_mid360
-from sim_clock import IsaacSimClockPublisher, setup_sim_clock
+from tooling.sim_clock import IsaacSimClockPublisher, setup_sim_clock
+from viewpoints import FollowCameraController
 
 LOGGER = get_logger("main")
 

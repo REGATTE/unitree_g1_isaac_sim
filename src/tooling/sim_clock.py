@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 
 from config import AppConfig
-from ros2_bridge_runtime import (
+from ros2_runtime import (
     enable_isaac_ros2_bridge_extension,
     prepare_isaac_ros2_bridge_environment,
 )

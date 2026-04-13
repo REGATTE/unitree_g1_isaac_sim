@@ -9,7 +9,7 @@ import sys
 from runtime_logging import get_logger
 
 
-LOGGER = get_logger("ros2_bridge_runtime")
+LOGGER = get_logger("ros2_runtime.environment")
 
 
 def prepare_isaac_ros2_bridge_environment(domain_id: int) -> None:

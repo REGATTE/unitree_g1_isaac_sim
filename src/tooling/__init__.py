@@ -1,4 +1,4 @@
-"""Shared tooling helpers for standalone DDS scripts."""
+"""Shared tooling helpers for runtime and standalone scripts."""
 
 from .joints import filter_joint_history_samples, resolve_joint_index
 
