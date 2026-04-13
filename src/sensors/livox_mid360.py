@@ -42,6 +42,17 @@ LOGGER = get_logger("sensors.livox_mid360")
 #   </joint>
 MID360_TRANSLATION_IN_TORSO = (0.0002835, 0.00003, 0.40618)
 MID360_RPY_IN_TORSO = (0.0, 0.04014257279586953, 0.0)
+MID360_CHANNEL_COUNT = 40
+MID360_FRAME_RATE_HZ = 10.0
+MID360_POINT_RATE_HZ = 200_000
+MID360_POINTS_PER_FRAME = int(round(MID360_POINT_RATE_HZ / MID360_FRAME_RATE_HZ))
+MID360_VERTICAL_FOV_DEG = (-7.0, 52.0)
+MID360_ELEVATION_DEG = np.linspace(
+    MID360_VERTICAL_FOV_DEG[0],
+    MID360_VERTICAL_FOV_DEG[1],
+    MID360_CHANNEL_COUNT,
+).tolist()
+MID360_FRAME_PHASE_RAD = math.pi * (3.0 - math.sqrt(5.0))
 
 
 MID360_RTX_ATTRIBUTES: dict[str, Any] = {
@@ -63,63 +74,24 @@ MID360_RTX_ATTRIBUTES: dict[str, Any] = {
     "omni:sensor:Core:elevationErrorMean": 0.1,
     "omni:sensor:Core:elevationErrorStd": 0.5,
     "omni:sensor:Core:maxReturns": 2,
-    "omni:sensor:Core:scanRateBaseHz": 20.0,
-    "omni:sensor:Core:reportRateBaseHz": 7761,
-    "omni:sensor:Core:numberOfEmitters": 40,
-    "omni:sensor:Core:numberOfChannels": 40,
+    "omni:sensor:Core:scanRateBaseHz": MID360_FRAME_RATE_HZ,
+    "omni:sensor:Core:reportRateBaseHz": MID360_POINT_RATE_HZ,
+    "omni:sensor:Core:numberOfEmitters": MID360_CHANNEL_COUNT,
+    "omni:sensor:Core:numberOfChannels": MID360_CHANNEL_COUNT,
     "omni:sensor:Core:rangeOffset": 0.03,
     "omni:sensor:Core:intensityMappingType": "LINEAR",
-    "omni:sensor:Core:emitterState:s001:azimuthDeg": [0.0] * 40,
-    "omni:sensor:Core:emitterState:s001:elevationDeg": [
-        -7.0,
-        -5.525,
-        -4.050,
-        -2.575,
-        -1.1004,
-        0.374,
-        1.849,
-        3.324,
-        4.799,
-        6.274,
-        7.7494,
-        9.2249,
-        10.699,
-        12.174,
-        13.645,
-        15.1243,
-        16.5999,
-        18.074,
-        19.5499,
-        21.024,
-        22.493,
-        23.9749,
-        25.44,
-        26.924,
-        28.39,
-        29.8743,
-        31.3499,
-        32.824,
-        34.29,
-        35.774,
-        37.2486,
-        38.724,
-        40.19,
-        41.674,
-        43.14,
-        44.624,
-        46.09,
-        47.574,
-        49.048,
-        50.524,
+    "omni:sensor:Core:emitterState:s001:azimuthDeg": [0.0] * MID360_CHANNEL_COUNT,
+    "omni:sensor:Core:emitterState:s001:elevationDeg": MID360_ELEVATION_DEG,
+    "omni:sensor:Core:emitterState:s001:fireTimeNs": [
+        index * 1000 for index in range(MID360_CHANNEL_COUNT)
     ],
-    "omni:sensor:Core:emitterState:s001:fireTimeNs": [index * 1000 for index in range(40)],
-    "omni:sensor:Core:emitterState:s001:distanceCorrectionM": [0.0] * 40,
-    "omni:sensor:Core:emitterState:s001:focalDistM": [0.0] * 40,
-    "omni:sensor:Core:emitterState:s001:focalSlope": [0.0] * 40,
-    "omni:sensor:Core:emitterState:s001:horOffsetM": [0.0] * 40,
-    "omni:sensor:Core:emitterState:s001:reportRateDiv": [0.0] * 40,
-    "omni:sensor:Core:emitterState:s001:vertOffsetM": [0.0] * 40,
-    "omni:sensor:Core:emitterState:s001:channelId": list(range(1, 41)),
+    "omni:sensor:Core:emitterState:s001:distanceCorrectionM": [0.0] * MID360_CHANNEL_COUNT,
+    "omni:sensor:Core:emitterState:s001:focalDistM": [0.0] * MID360_CHANNEL_COUNT,
+    "omni:sensor:Core:emitterState:s001:focalSlope": [0.0] * MID360_CHANNEL_COUNT,
+    "omni:sensor:Core:emitterState:s001:horOffsetM": [0.0] * MID360_CHANNEL_COUNT,
+    "omni:sensor:Core:emitterState:s001:reportRateDiv": [0.0] * MID360_CHANNEL_COUNT,
+    "omni:sensor:Core:emitterState:s001:vertOffsetM": [0.0] * MID360_CHANNEL_COUNT,
+    "omni:sensor:Core:emitterState:s001:channelId": list(range(1, MID360_CHANNEL_COUNT + 1)),
 }
 
 
@@ -165,15 +137,7 @@ class LivoxMid360RosPublisher:
         self._last_data_warning_time_seconds = -math.inf
         self._first_publish_logged = False
         self._scan_index = 0
-        self._points_per_scan = max(
-            1,
-            int(
-                round(
-                    float(MID360_RTX_ATTRIBUTES["omni:sensor:Core:reportRateBaseHz"])
-                    / float(MID360_RTX_ATTRIBUTES["omni:sensor:Core:scanRateBaseHz"])
-                )
-            ),
-        )
+        self._points_per_scan = MID360_POINTS_PER_FRAME
         self._near_range_m = float(MID360_RTX_ATTRIBUTES["omni:sensor:Core:nearRangeM"])
         self._far_range_m = float(MID360_RTX_ATTRIBUTES["omni:sensor:Core:farRangeM"])
         self._elevations_rad = np.deg2rad(
@@ -245,13 +209,12 @@ class LivoxMid360RosPublisher:
         world_to_sensor = sensor_to_world.GetInverse()
         origin_world = sensor_to_world.Transform(Gf.Vec3d(0.0, 0.0, 0.0))
         points: list[tuple[float, float, float]] = []
-        golden_angle = math.pi * (3.0 - math.sqrt(5.0))
-        start_ray = self._scan_index * self._points_per_scan
 
-        for ray_index in range(self._points_per_scan):
-            absolute_ray_index = start_ray + ray_index
-            elevation = float(self._elevations_rad[absolute_ray_index % len(self._elevations_rad)])
-            azimuth = (absolute_ray_index * golden_angle) % (2.0 * math.pi)
+        for elevation, azimuth in _iter_mid360_scan_angles(
+            self._scan_index,
+            self._points_per_scan,
+            self._elevations_rad,
+        ):
 
             # MID360 is mounted inverted on this G1, so the vertical fan is flipped
             # relative to the sensor profile. This keeps the simulated returns in
@@ -388,6 +351,33 @@ def _make_point_cloud2(points: np.ndarray, frame_id: str, stamp_seconds: float):
     message.data = contiguous_points.tobytes()
     message.is_dense = True
     return message
+
+
+def _iter_mid360_scan_angles(
+    scan_index: int,
+    points_per_scan: int,
+    elevations_rad: np.ndarray,
+):
+    """Yield a deterministic 40-channel 360-degree MID360-like scan pattern."""
+    if points_per_scan <= 0 or elevations_rad.size == 0:
+        return
+
+    channel_count = int(elevations_rad.size)
+    columns = max(1, math.ceil(points_per_scan / channel_count))
+    phase = (scan_index * MID360_FRAME_PHASE_RAD) % (2.0 * math.pi)
+    emitted = 0
+
+    for column_index in range(columns):
+        base_azimuth = (2.0 * math.pi * column_index / columns + phase) % (2.0 * math.pi)
+        for channel_index, elevation in enumerate(elevations_rad):
+            if emitted >= points_per_scan:
+                return
+            azimuth = (
+                base_azimuth
+                + (2.0 * math.pi * channel_index / (columns * channel_count))
+            ) % (2.0 * math.pi)
+            yield float(elevation), float(azimuth)
+            emitted += 1
 
 
 def _enable_extension(extension_id: str) -> None:
