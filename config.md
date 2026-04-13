@@ -77,6 +77,14 @@ isaac_sim_python src/main.py --use-world
 | `--bridge-bind-host` | `127.0.0.1` | Local interface used for Isaac Sim to sidecar UDP traffic. | `isaac_sim_python src/main.py --bridge-bind-host 127.0.0.1` |
 | `--bridge-lowstate-port` | `35501` | UDP port used for Isaac Sim to sidecar lowstate packets. | `isaac_sim_python src/main.py --bridge-lowstate-port 35501` |
 | `--bridge-lowcmd-port` | `35502` | UDP port used for sidecar to Isaac Sim lowcmd packets. | `isaac_sim_python src/main.py --bridge-lowcmd-port 35502` |
+| `--enable-livox-lidar` / `--no-enable-livox-lidar` | `true` | Creates or disables the Isaac-native Livox MID360 RTX LiDAR approximation. This publishes through Isaac's ROS 2 bridge, not the LowState / LowCmd sidecar. | `isaac_sim_python src/main.py --no-enable-livox-lidar` |
+| `--livox-lidar-topic` | `livox/lidar` | ROS 2 `sensor_msgs/msg/PointCloud2` topic for the simulated MID360. | `isaac_sim_python src/main.py --livox-lidar-topic livox/lidar` |
+| `--livox-lidar-frame-id` | `mid360_link` | Frame id used in the simulated MID360 point cloud messages. | `isaac_sim_python src/main.py --livox-lidar-frame-id mid360_link` |
+| `--livox-lidar-parent-link-name` | `torso_link` | USD prim name searched under the robot prim when mounting the MID360 frame. Mirrors the URDF fixed joint parent. | `isaac_sim_python src/main.py --livox-lidar-parent-link-name torso_link` |
+| `--livox-lidar-prim-name` | `mid360_link` | USD Xform created under the parent link for the simulated MID360 frame. Mirrors the URDF fixed joint child. | `isaac_sim_python src/main.py --livox-lidar-prim-name mid360_link` |
+| `--livox-lidar-sensor-prim-name` | `mid360_rtx_lidar` | USD prim name for the actual RTX LiDAR sensor under the MID360 frame. | `isaac_sim_python src/main.py --livox-lidar-sensor-prim-name mid360_rtx_lidar` |
+| `--livox-lidar-rtx-config` | `OS1` | Base Isaac RTX LiDAR config used for the MID360 approximation. Use `none` to create a generic OmniLidar using only explicit attributes. | `isaac_sim_python src/main.py --livox-lidar-rtx-config OS1` |
+| `--livox-lidar-rtx-variant` | `OS1_REV6_32ch20hz1024res` | RTX LiDAR config variant used with `--livox-lidar-rtx-config`. Use `none` to pass no variant. | `isaac_sim_python src/main.py --livox-lidar-rtx-variant none` |
 
 ## Notes
 
@@ -89,3 +97,9 @@ isaac_sim_python src/main.py --use-world
 - The follow camera uses the robot base pose from the same kinematic snapshot
   path used by DDS state publication, so it still follows when DDS is disabled.
 - `--lowstate-publish-hz` must not exceed `1 / --physics-dt`.
+- The simulated MID360 is mounted at the same `torso_link -> mid360_link`
+  transform as the URDF and publishes point clouds with `frame_id=mid360_link`.
+  Let the URDF / `robot_state_publisher` own TF for this frame.
+- The simulated MID360 uses Isaac's RTX LiDAR ROS 2 writer directly. Source
+  ROS 2 before launching Isaac Sim and keep `ROS_DOMAIN_ID` aligned with RViz
+  and navigation nodes.

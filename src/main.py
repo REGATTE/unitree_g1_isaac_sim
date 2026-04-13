@@ -24,6 +24,8 @@ from robot_state import (
 )
 from runtime_logging import configure_logging, get_logger
 from scene import build_scene
+from sensors.livox_mid360 import LivoxMid360RosPublisher, setup_livox_mid360
+from sim_clock import IsaacSimClockPublisher, setup_sim_clock
 
 LOGGER = get_logger("main")
 
@@ -82,12 +84,15 @@ def run_main_loop(
     dds_manager: DdsManager | None,
     command_applier: RobotCommandApplier | None,
     camera_controller: FollowCameraController | None,
+    sim_clock_publisher: IsaacSimClockPublisher | None,
+    livox_publisher: LivoxMid360RosPublisher | None,
 ) -> None:
     """Advance the simulator until the app closes or the frame cap is reached."""
 
     frame_count = 0
     simulation_time_seconds = 0.0
     reset_triggered = False
+    render_enabled = not headless
     try:
         while simulation_app.is_running():
             # Apply the latest cached low-level command before stepping physics
@@ -95,13 +100,17 @@ def run_main_loop(
             if dds_manager is not None and command_applier is not None:
                 command_applier.apply_lowcmd(dds_manager.latest_lowcmd)
             # Use World.step so the simulation context, physics, and rendering stay aligned.
-            world.step(render=not headless)
+            world.step(render=render_enabled)
             frame_count += 1
             simulation_time_seconds += physics_dt
             if reset_after_frames > 0 and not reset_triggered and frame_count >= reset_after_frames:
                 perform_runtime_reset(world, state_reader, dds_manager)
                 simulation_time_seconds = 0.0
                 reset_triggered = True
+            if sim_clock_publisher is not None:
+                sim_clock_publisher.publish(simulation_time_seconds)
+            if livox_publisher is not None:
+                livox_publisher.step(simulation_time_seconds)
             snapshot = None
             if dds_manager is not None or camera_controller is not None:
                 try:
@@ -169,6 +178,9 @@ def main() -> int:
         if world_path is not None:
             LOGGER.info("world_path=%s", world_path)
         build_scene(asset_path, config, world_path)
+        sim_clock_publisher = setup_sim_clock(config)
+        livox_setup = setup_livox_mid360(config)
+        livox_publisher = livox_setup.publisher if livox_setup is not None else None
         camera_controller = FollowCameraController(config) if config.enable_follow_camera else None
         if camera_controller is not None:
             camera_controller.initialize()
@@ -201,6 +213,8 @@ def main() -> int:
             dds_manager,
             command_applier,
             camera_controller,
+            sim_clock_publisher,
+            livox_publisher,
         )
     except Exception:
         LOGGER.exception("fatal error during startup/runtime")
@@ -208,6 +222,10 @@ def main() -> int:
     finally:
         if "dds_manager" in locals() and dds_manager is not None:
             dds_manager.shutdown()
+        if "livox_publisher" in locals() and livox_publisher is not None:
+            livox_publisher.shutdown()
+        if "sim_clock_publisher" in locals() and sim_clock_publisher is not None:
+            sim_clock_publisher.shutdown()
         simulation_app.close()
 
     return 0
