@@ -17,4 +17,6 @@ struct LowStatePacket {
   std::array<double, 3> imu_gyroscope_body{0.0, 0.0, 0.0};
 };
 
+bool DecodeLowStatePacket(const std::string& payload, LowStatePacket& packet);
+
 }  // namespace native_sdk_bridge
