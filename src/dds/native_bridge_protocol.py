@@ -34,3 +34,8 @@ def encode_native_lowstate_packet(snapshot: RobotKinematicSnapshot, tick: int) -
 def decode_native_lowstate_packet(packet: bytes) -> dict[str, Any]:
     """Parse a native lowstate localhost packet."""
     return json.loads(packet.decode("utf-8"))
+
+
+def decode_native_lowcmd_packet(packet: bytes) -> dict[str, Any]:
+    """Parse a native lowcmd localhost packet."""
+    return json.loads(packet.decode("utf-8"))

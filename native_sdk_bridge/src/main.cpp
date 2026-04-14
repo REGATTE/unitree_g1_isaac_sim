@@ -7,6 +7,7 @@
 #include <unistd.h>
 
 #include "native_sdk_bridge/bridge_protocol.hpp"
+#include "native_sdk_bridge/lowcmd_subscriber.hpp"
 #include "native_sdk_bridge/lowstate_publisher.hpp"
 
 namespace {
@@ -15,9 +16,13 @@ volatile std::sig_atomic_t g_running = 1;
 
 struct Options {
   int domain_id{1};
+  bool enable_lowstate{true};
+  bool enable_lowcmd{false};
   std::string lowstate_topic{"rt/lowstate"};
+  std::string lowcmd_topic{"rt/lowcmd"};
   std::string bind_host{"127.0.0.1"};
   int lowstate_port{35511};
+  int lowcmd_port{35512};
 };
 
 void handle_signal(int) {
@@ -30,18 +35,31 @@ Options parse_args(int argc, char* argv[]) {
     const std::string arg = argv[index];
     if (arg == "--domain-id" && index + 1 < argc) {
       options.domain_id = std::stoi(argv[++index]);
+    } else if (arg == "--enable-lowstate") {
+      options.enable_lowstate = true;
+    } else if (arg == "--disable-lowstate") {
+      options.enable_lowstate = false;
+    } else if (arg == "--enable-lowcmd") {
+      options.enable_lowcmd = true;
     } else if (arg == "--lowstate-topic" && index + 1 < argc) {
       options.lowstate_topic = argv[++index];
+    } else if (arg == "--lowcmd-topic" && index + 1 < argc) {
+      options.lowcmd_topic = argv[++index];
     } else if (arg == "--bind-host" && index + 1 < argc) {
       options.bind_host = argv[++index];
     } else if (arg == "--lowstate-port" && index + 1 < argc) {
       options.lowstate_port = std::stoi(argv[++index]);
+    } else if (arg == "--lowcmd-port" && index + 1 < argc) {
+      options.lowcmd_port = std::stoi(argv[++index]);
     }
   }
   return options;
 }
 
 int create_udp_socket(const Options& options) {
+  if (!options.enable_lowstate) {
+    return -1;
+  }
   const int fd = socket(AF_INET, SOCK_DGRAM, 0);
   if (fd < 0) {
     std::perror("socket");
@@ -74,24 +92,44 @@ int main(int argc, char* argv[]) {
   std::signal(SIGTERM, handle_signal);
 
   const int socket_fd = create_udp_socket(options);
-  if (socket_fd < 0) {
+  if (options.enable_lowstate && socket_fd < 0) {
     return 1;
   }
 
   std::cerr << "native bridge starting "
             << "(domain_id=" << options.domain_id
+            << ", enable_lowstate=" << options.enable_lowstate
+            << ", enable_lowcmd=" << options.enable_lowcmd
             << ", lowstate_topic=" << options.lowstate_topic
+            << ", lowcmd_topic=" << options.lowcmd_topic
             << ", bind_host=" << options.bind_host
             << ", lowstate_port=" << options.lowstate_port
+            << ", lowcmd_port=" << options.lowcmd_port
             << ")" << std::endl;
 
   native_sdk_bridge::LowStatePublisher publisher;
-  if (!publisher.initialize(options.domain_id, options.lowstate_topic)) {
-    close(socket_fd);
+  if (options.enable_lowstate && !publisher.initialize(options.domain_id, options.lowstate_topic)) {
+    if (socket_fd >= 0) {
+      close(socket_fd);
+    }
+    return 1;
+  }
+
+  native_sdk_bridge::LowCmdSubscriber subscriber;
+  if (options.enable_lowcmd &&
+      !subscriber.initialize(options.domain_id, options.lowcmd_topic, options.bind_host, options.lowcmd_port)) {
+    publisher.shutdown();
+    if (socket_fd >= 0) {
+      close(socket_fd);
+    }
     return 1;
   }
 
   while (g_running) {
+    if (!options.enable_lowstate) {
+      pause();
+      continue;
+    }
     char buffer[65535];
     sockaddr_in peer{};
     socklen_t peer_len = sizeof(peer);
@@ -115,6 +153,9 @@ int main(int argc, char* argv[]) {
   }
 
   publisher.shutdown();
-  close(socket_fd);
+  subscriber.shutdown();
+  if (socket_fd >= 0) {
+    close(socket_fd);
+  }
   return 0;
 }

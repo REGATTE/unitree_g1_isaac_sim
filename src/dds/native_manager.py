@@ -1,4 +1,4 @@
-"""Native Unitree SDK bridge lifecycle for the publish-only Phase 1 path."""
+"""Native Unitree SDK bridge lifecycle for lowstate publication and lowcmd ingress."""
 
 from __future__ import annotations
 
@@ -15,13 +15,15 @@ from robot_state import RobotKinematicSnapshot
 from runtime_logging import get_logger
 
 from .lowcmd_types import LowCmdCache
-from .manager import CadenceTracker, _compute_publish_period
+from .manager import CadenceTracker, _compute_publish_period, _is_fresh
+from .native_udp_lowcmd import NativeLowCmdUdpSubscriber
 from .native_udp_lowstate import NativeLowStateUdpPublisher
 
 
 LOGGER = get_logger("dds.native_manager")
 
 NATIVE_UDP_LOWSTATE_PORT = 35511
+NATIVE_UDP_LOWCMD_PORT = 35512
 
 
 @dataclass(frozen=True)
@@ -53,14 +55,20 @@ class NativeUnitreeDdsManager:
             host=config.bridge_bind_host,
             port=NATIVE_UDP_LOWSTATE_PORT,
         )
+        self._lowcmd_subscriber = NativeLowCmdUdpSubscriber(
+            bind_host=config.bridge_bind_host,
+            bind_port=NATIVE_UDP_LOWCMD_PORT,
+        )
         self._simulation_cadence = CadenceTracker(label="native_simulation_time")
         self._wall_clock_cadence = CadenceTracker(label="native_wall_clock")
         self._warned_missing_bridge = False
-        self._warned_lowcmd_unimplemented = False
+        self._warned_stale_lowcmd = False
 
     @property
     def latest_lowcmd(self) -> LowCmdCache | None:
-        return None
+        if not self._config.enable_native_unitree_lowcmd:
+            return None
+        return self._resolve_latest_lowcmd(now_monotonic=time.monotonic())
 
     def initialize(self) -> bool:
         """Initialize the publish-only native DDS bridge."""
@@ -68,8 +76,8 @@ class NativeUnitreeDdsManager:
             return self._sdk_enabled
         self._initialized = True
 
-        if not self._config.enable_native_unitree_lowstate:
-            LOGGER.info("native lowstate publisher disabled for this run")
+        if not self._config.enable_native_unitree_lowstate and not self._config.enable_native_unitree_lowcmd:
+            LOGGER.info("native Unitree bridge disabled for this run")
             return False
 
         bridge_executable = self._config.native_unitree_bridge_exe.expanduser().resolve()
@@ -84,19 +92,21 @@ class NativeUnitreeDdsManager:
             return False
 
         try:
+            if self._config.enable_native_unitree_lowcmd:
+                self._lowcmd_subscriber.initialize()
+            else:
+                LOGGER.info("native lowcmd subscriber disabled for this run")
             self._start_bridge(bridge_executable)
-            self._lowstate_publisher.initialize()
+            if self._config.enable_native_unitree_lowstate:
+                self._lowstate_publisher.initialize()
+            else:
+                LOGGER.info("native lowstate publisher disabled for this run")
             self._sdk_enabled = True
-            if self._config.enable_native_unitree_lowcmd and not self._warned_lowcmd_unimplemented:
-                LOGGER.info(
-                    "native lowcmd is configured but not implemented in Phase 1; "
-                    "native bridge is running in lowstate publish-only mode."
-                )
-                self._warned_lowcmd_unimplemented = True
             LOGGER.info(
-                "initialized native Unitree bridge (domain_id=%s topic=%s)",
+                "initialized native Unitree bridge (domain_id=%s lowstate_topic=%s lowcmd_topic=%s)",
                 self._config.native_unitree_domain_id,
                 self._config.native_unitree_lowstate_topic,
+                self._config.native_unitree_lowcmd_topic,
             )
             return True
         except Exception:
@@ -108,9 +118,15 @@ class NativeUnitreeDdsManager:
 
         if self._sdk_enabled:
             self._poll_bridge_health()
+            if self._config.enable_native_unitree_lowcmd:
+                self._lowcmd_subscriber.poll()
 
         lowstate_published = False
-        if self._sdk_enabled and simulation_time_seconds >= self._next_lowstate_publish_time:
+        if (
+            self._sdk_enabled
+            and self._config.enable_native_unitree_lowstate
+            and simulation_time_seconds >= self._next_lowstate_publish_time
+        ):
             lowstate_published = self._lowstate_publisher.publish(snapshot)
             self._advance_lowstate_publish_schedule(simulation_time_seconds)
             if lowstate_published:
@@ -128,13 +144,21 @@ class NativeUnitreeDdsManager:
                     warn_ratio=self._config.lowstate_cadence_warn_ratio,
                 )
 
+        active_lowcmd = self._resolve_latest_lowcmd(now_monotonic=time.monotonic())
+
         return NativeDdsStepResult(
             lowstate_published=lowstate_published,
-            lowcmd_available=False,
-            lowcmd_fresh=False,
+            lowcmd_available=(
+                self._config.enable_native_unitree_lowcmd
+                and self._lowcmd_subscriber.latest_command is not None
+            ),
+            lowcmd_fresh=active_lowcmd is not None,
         )
 
     def reset_runtime_state(self) -> None:
+        if hasattr(self._lowcmd_subscriber, "clear_cached_command"):
+            self._lowcmd_subscriber.clear_cached_command()
+        self._warned_stale_lowcmd = False
         self._next_lowstate_publish_time = 0.0
         self._simulation_cadence = CadenceTracker(label="native_simulation_time")
         self._wall_clock_cadence = CadenceTracker(label="native_wall_clock")
@@ -150,12 +174,18 @@ class NativeUnitreeDdsManager:
                 self._bridge_process.wait(timeout=5.0)
         self._bridge_process = None
         self._lowstate_publisher.close()
+        self._lowcmd_subscriber.close()
         self._lowstate_publisher = NativeLowStateUdpPublisher(
             host=self._config.bridge_bind_host,
             port=NATIVE_UDP_LOWSTATE_PORT,
         )
+        self._lowcmd_subscriber = NativeLowCmdUdpSubscriber(
+            bind_host=self._config.bridge_bind_host,
+            bind_port=NATIVE_UDP_LOWCMD_PORT,
+        )
         self._sdk_enabled = False
         self._initialized = False
+        self._warned_stale_lowcmd = False
         self._next_lowstate_publish_time = 0.0
         self._simulation_cadence = CadenceTracker(label="native_simulation_time")
         self._wall_clock_cadence = CadenceTracker(label="native_wall_clock")
@@ -167,6 +197,7 @@ class NativeUnitreeDdsManager:
             str(bridge_executable),
             "--domain-id",
             str(self._config.native_unitree_domain_id),
+            "--enable-lowstate" if self._config.enable_native_unitree_lowstate else "--disable-lowstate",
             "--lowstate-topic",
             self._config.native_unitree_lowstate_topic,
             "--bind-host",
@@ -174,6 +205,16 @@ class NativeUnitreeDdsManager:
             "--lowstate-port",
             str(NATIVE_UDP_LOWSTATE_PORT),
         ]
+        if self._config.enable_native_unitree_lowcmd:
+            command.extend(
+                [
+                    "--enable-lowcmd",
+                    "--lowcmd-topic",
+                    self._config.native_unitree_lowcmd_topic,
+                    "--lowcmd-port",
+                    str(self._lowcmd_subscriber.bound_port),
+                ]
+            )
         self._bridge_process = subprocess.Popen(
             command,
             cwd=Path(__file__).resolve().parents[2],
@@ -200,6 +241,34 @@ class NativeUnitreeDdsManager:
         if return_code is not None and self._sdk_enabled:
             LOGGER.error("native Unitree bridge exited unexpectedly with code %s", return_code)
             self._sdk_enabled = False
+
+    def _resolve_latest_lowcmd(self, now_monotonic: float) -> LowCmdCache | None:
+        if not self._config.enable_native_unitree_lowcmd:
+            self._warned_stale_lowcmd = False
+            return None
+        cached = self._lowcmd_subscriber.latest_command
+        is_fresh = _is_fresh(now_monotonic, cached, self._config.lowcmd_timeout_seconds)
+        if not is_fresh:
+            if cached is None:
+                self._warned_stale_lowcmd = False
+                return None
+            if not self._warned_stale_lowcmd:
+                age_seconds = now_monotonic - cached.received_at_monotonic
+                LOGGER.warning(
+                    "cached native `rt/lowcmd` sample went stale after %.3fs; stopping command "
+                    "reapplication until a fresh sample arrives.",
+                    age_seconds,
+                )
+                self._warned_stale_lowcmd = True
+            return None
+
+        if cached is None:
+            self._warned_stale_lowcmd = False
+            return None
+        if self._warned_stale_lowcmd:
+            LOGGER.info("received fresh native `rt/lowcmd` again; resuming command application.")
+        self._warned_stale_lowcmd = False
+        return cached
 
     def _advance_lowstate_publish_schedule(self, simulation_time_seconds: float) -> None:
         while self._next_lowstate_publish_time <= simulation_time_seconds:

@@ -31,6 +31,7 @@ namespace {
 
 constexpr std::size_t kBodyJointCount = 29;
 constexpr std::size_t kMotorSlotCount = 35;
+constexpr int64_t kWriteWaitForReaderMicroseconds = 20000;
 
 LowState_ BuildLowStateMessage(const LowStatePacket& packet) {
   LowState_ message;
@@ -109,7 +110,7 @@ bool LowStatePublisher::publish(const LowStatePacket& packet) {
     return false;
   }
   const LowState_ message = BuildLowStateMessage(packet);
-  return impl_->publisher->Write(message);
+  return impl_->publisher->Write(message, kWriteWaitForReaderMicroseconds);
 }
 
 void LowStatePublisher::shutdown() {

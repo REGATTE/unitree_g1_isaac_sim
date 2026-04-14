@@ -32,6 +32,7 @@ find_package(Threads REQUIRED)
 add_executable(unitree_g1_native_bridge
   src/main.cpp
   src/bridge_protocol.cpp
+  src/lowcmd_subscriber.cpp
   src/lowstate_publisher.cpp
 )
 

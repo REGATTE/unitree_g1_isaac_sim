@@ -392,7 +392,8 @@ Responsibilities:
 
 - C++ sidecar:
   - create `ChannelSubscriber<LowCmd_>` or the equivalent C++ SDK subscriber
-  - validate CRC using the C++ SDK helper
+  - validate CRC using the C++ SDK helper when CRC is populated; accept zero CRC
+    because several Unitree HG examples publish `LowCmd_` without setting CRC
   - reject messages with fewer than 29 motor slots
   - clamp messages with more than 29 motor slots to the body joint count
   - encode the first 29 DDS-order body command slots into a localhost packet
@@ -744,6 +745,9 @@ Maps to milestones:
 - Milestone 2
 
 ### Phase 2: Native Lowcmd Ingress
+
+Status: implemented in code; external Isaac Sim motion validation remains part
+of Phase 3 mixed-mode smoke testing.
 
 Scope:
 

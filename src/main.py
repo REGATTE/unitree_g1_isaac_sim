@@ -12,6 +12,7 @@ import logging
 
 from config import PROJECT_ROOT, AppConfig, parse_config
 from dds import DdsManager, NativeUnitreeDdsManager
+from dds.lowcmd_types import LowCmdCache
 from mapping import log_joint_validation_report, to_dds_ordered_snapshot, validate_live_joint_order
 from robot_control import RobotCommandApplier
 from robot_state import (
@@ -28,6 +29,20 @@ from tooling.sim_clock import IsaacSimClockPublisher, setup_sim_clock
 from viewpoints import FollowCameraController
 
 LOGGER = get_logger("main")
+
+
+def resolve_active_lowcmd(
+    dds_manager: DdsManager | None,
+    native_dds_manager: NativeUnitreeDdsManager | None,
+) -> LowCmdCache | None:
+    """Return the configured command source; config preflight guarantees one lowcmd authority."""
+    if native_dds_manager is not None:
+        native_lowcmd = native_dds_manager.latest_lowcmd
+        if native_lowcmd is not None:
+            return native_lowcmd
+    if dds_manager is not None:
+        return dds_manager.latest_lowcmd
+    return None
 
 
 def load_simulation_app(config: AppConfig):
@@ -101,8 +116,8 @@ def run_main_loop(
         while simulation_app.is_running():
             # Apply the latest cached low-level command before stepping physics
             # so the next simulator frame reflects the current DDS input.
-            if dds_manager is not None and command_applier is not None:
-                command_applier.apply_lowcmd(dds_manager.latest_lowcmd)
+            if command_applier is not None:
+                command_applier.apply_lowcmd(resolve_active_lowcmd(dds_manager, native_dds_manager))
             # Use World.step so the simulation context, physics, and rendering stay aligned.
             world.step(render=render_enabled)
             frame_count += 1

@@ -10,6 +10,7 @@ if str(SRC_ROOT) not in sys.path:
 
 from config import AppConfig
 from dds.native_manager import NativeUnitreeDdsManager
+from dds.lowcmd_types import LowCmdCache
 
 
 class _FakeNativeLowStatePublisher:
@@ -25,6 +26,44 @@ class _FakeNativeLowStatePublisher:
 
     def close(self):
         return None
+
+
+class _FakeNativeLowCmdSubscriber:
+    def __init__(self, command=None):
+        self.latest_command = command
+        self.poll_calls = 0
+        self.clear_calls = 0
+        self.close_calls = 0
+
+    @property
+    def bound_port(self):
+        return 45678
+
+    def initialize(self):
+        return True
+
+    def poll(self):
+        self.poll_calls += 1
+
+    def clear_cached_command(self):
+        self.clear_calls += 1
+        self.latest_command = None
+
+    def close(self):
+        self.close_calls += 1
+
+
+def _lowcmd(received_at=100.0):
+    return LowCmdCache(
+        mode_pr=0,
+        mode_machine=0,
+        joint_positions_dds=tuple(0.0 for _ in range(29)),
+        joint_velocities_dds=tuple(0.0 for _ in range(29)),
+        joint_torques_dds=tuple(0.0 for _ in range(29)),
+        joint_kp_dds=tuple(0.0 for _ in range(29)),
+        joint_kd_dds=tuple(0.0 for _ in range(29)),
+        received_at_monotonic=received_at,
+    )
 
 
 def _build_config(**overrides) -> AppConfig:
@@ -82,6 +121,7 @@ class NativeUnitreeDdsManagerTests(unittest.TestCase):
         manager._initialized = True
         manager._sdk_enabled = True
         manager._lowstate_publisher = _FakeNativeLowStatePublisher()
+        manager._lowcmd_subscriber = _FakeNativeLowCmdSubscriber()
 
         snapshot = object()
         published_frames = []
@@ -99,6 +139,7 @@ class NativeUnitreeDdsManagerTests(unittest.TestCase):
 
     def test_reset_runtime_state_clears_native_cadence_state(self):
         manager = NativeUnitreeDdsManager(_build_config())
+        manager._lowcmd_subscriber = _FakeNativeLowCmdSubscriber(command=_lowcmd())
         manager._next_lowstate_publish_time = 12.5
         manager._simulation_cadence.window_start_time = 5.0
         manager._simulation_cadence.publish_count = 10
@@ -108,10 +149,44 @@ class NativeUnitreeDdsManagerTests(unittest.TestCase):
         manager.reset_runtime_state()
 
         self.assertEqual(manager._next_lowstate_publish_time, 0.0)
+        self.assertIsNone(manager._lowcmd_subscriber.latest_command)
+        self.assertEqual(manager._lowcmd_subscriber.clear_calls, 1)
         self.assertIsNone(manager._simulation_cadence.window_start_time)
         self.assertEqual(manager._simulation_cadence.publish_count, 0)
         self.assertIsNone(manager._wall_clock_cadence.window_start_time)
         self.assertEqual(manager._wall_clock_cadence.publish_count, 0)
+
+    def test_resolve_latest_lowcmd_returns_fresh_native_command(self):
+        command = _lowcmd(received_at=10.0)
+        manager = NativeUnitreeDdsManager(_build_config(lowcmd_timeout_seconds=0.5))
+        manager._lowcmd_subscriber = _FakeNativeLowCmdSubscriber(command=command)
+
+        resolved = manager._resolve_latest_lowcmd(now_monotonic=10.25)
+
+        self.assertIs(resolved, command)
+
+    def test_resolve_latest_lowcmd_drops_stale_native_command(self):
+        command = _lowcmd(received_at=10.0)
+        manager = NativeUnitreeDdsManager(_build_config(lowcmd_timeout_seconds=0.5))
+        manager._lowcmd_subscriber = _FakeNativeLowCmdSubscriber(command=command)
+
+        resolved = manager._resolve_latest_lowcmd(now_monotonic=11.0)
+
+        self.assertIsNone(resolved)
+
+    def test_step_polls_native_lowcmd_when_enabled(self):
+        command = _lowcmd(received_at=10.0)
+        manager = NativeUnitreeDdsManager(_build_config(lowcmd_timeout_seconds=0.0))
+        manager._initialized = True
+        manager._sdk_enabled = True
+        manager._lowstate_publisher = _FakeNativeLowStatePublisher()
+        manager._lowcmd_subscriber = _FakeNativeLowCmdSubscriber(command=command)
+
+        result = manager.step(1.0 / 120.0, object())
+
+        self.assertEqual(manager._lowcmd_subscriber.poll_calls, 1)
+        self.assertTrue(result.lowcmd_available)
+        self.assertTrue(result.lowcmd_fresh)
 
 
 if __name__ == "__main__":
