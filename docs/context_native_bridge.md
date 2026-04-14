@@ -283,7 +283,7 @@ ldd native_sdk_bridge/build/unitree_g1_native_bridge | grep ddsc
 
 The `libddsc` and `libddscxx` paths should point under
 `~/unitree_sdk2/thirdparty/lib/<arch>/`. If they resolve from `/opt/ros/humble`,
-see `docs/issues.md`.
+see `issues.md`.
 
 ## Validation
 

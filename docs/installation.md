@@ -1,15 +1,16 @@
 # Installation
 
-This document is the instruction for installing all the required libraries and dependencies.
+This document lists the host dependencies needed to run the Unitree G1 Isaac
+Sim environment with the ROS 2 sidecar bridge and the native Unitree SDK bridge.
 
-**Tested on:**
+Tested environment:
 
-    ROS2: Humble
-    Ubuntu: 22.04 LTS
-    Isaac Sim v5.1
-    Nvidia Driver: 580.126.xx
+- ROS 2 Humble
+- Ubuntu 22.04 LTS
+- Isaac Sim 5.1
+- NVIDIA driver 580.126.xx
 
-## Repo
+## Clone This Repository
 
 ```bash
 mkdir -p ~/Workspaces/ros2_ws/src
@@ -20,7 +21,9 @@ git lfs install
 git lfs pull
 ```
 
-Note: This repo has no ros2 packages to build. A **.COLCON_IGNORE** file has been added, to not build any files from this repo.
+This repository is not a ROS 2 package and does not need to be built with
+`colcon`. The repo includes `.COLCON_IGNORE` so it is skipped when the parent
+ROS 2 workspace is built.
 
 ## Cyclone DDS
 
@@ -31,7 +34,17 @@ sudo apt update && sudo apt install -y \
   libyaml-cpp-dev
 ```
 
-## Install unitree_ros2
+```bash
+# Add this to the ~/.bashrc
+export CYCLONEDDS_HOME=$HOME/cyclonedds/install
+export CMAKE_PREFIX_PATH=$CYCLONEDDS_HOME:$CMAKE_PREFIX_PATH
+export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+```
+
+## Install `unitree_ros2`
+
+`unitree_ros2` provides the `unitree_hg` ROS 2 message definitions used by the
+ROS 2 sidecar bridge.
 
 ```bash
 cd ~/Workspaces
@@ -40,23 +53,39 @@ cd unitree_ros2/cyclonedds_ws/
 colcon build
 ```
 
+Source the workspace and set the ROS 2 middleware/domain for simulator testing:
+
 ```bash
+source ~/Workspaces/unitree_ros2/cyclonedds_ws/install/setup.bash
 export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 export ROS_DOMAIN_ID=1
 ```
 
-**Note**: Make sure to source the `cyclonedds_ws` everytime, or place the sourcing in `~/.bashrc`. Same for the the RMW
+Add those exports to `~/.bashrc` if you want them applied automatically in new
+terminals. Keep the real robot on domain `0`; use domain `1` for simulator
+testing unless you intentionally choose another isolated domain.
 
-## Install unitree_sdk2 (this is the native sdk referred in the code-base)
+## Install `unitree_sdk2`
+
+`unitree_sdk2` is the native SDK used by `native_sdk_bridge/`.
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y cmake g++ build-essential libyaml-cpp-dev libeigen3-dev libboost-all-dev libspdlog-dev libfmt-dev
+sudo apt-get install -y \
+  cmake \
+  g++ \
+  build-essential \
+  libyaml-cpp-dev \
+  libeigen3-dev \
+  libboost-all-dev \
+  libspdlog-dev \
+  libfmt-dev
 ```
 
-Install in the home directory
+Install it under your home directory:
 
 ```bash
+cd ~
 git clone https://github.com/unitreerobotics/unitree_sdk2.git
 cd unitree_sdk2
 mkdir build && cd build
@@ -64,6 +93,29 @@ cmake ..
 sudo make install
 ```
 
+The simulator bridge build expects the source checkout at `~/unitree_sdk2` by
+default. If you put it elsewhere, pass `-DUNITREE_SDK2_ROOT=/path/to/unitree_sdk2`
+when building `native_sdk_bridge`.
+
 ## Install Isaac Sim v5.1
 
-Follow this [Isaac Sim Documentation - Workstation Installation](https://docs.isaacsim.omniverse.nvidia.com/5.1.0/installation/install_workstation.html)
+Follow NVIDIA's Isaac Sim workstation installation guide:
+
+[Isaac Sim 5.1 Workstation Installation](https://docs.isaacsim.omniverse.nvidia.com/5.1.0/installation/install_workstation.html)
+
+### Setup Alias
+
+```bash
+# Add this to ~/.bashrc
+export ISAACSIM_PATH="${HOME}/Omniverse/isaac_sim"
+export ISAACSIM_PYTHON_EXE="${ISAACSIM_PATH}/python.sh"
+
+alias isaac_sim="cd ${ISAACSIM_PATH} && ./isaac-sim.sh"
+alias isaac_sim_python="${ISAACSIM_PYTHON_EXE}"
+```
+
+After installation, confirm the simulator launcher is available:
+
+```bash
+isaac_sim_python --help
+```

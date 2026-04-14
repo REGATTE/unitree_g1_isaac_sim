@@ -378,4 +378,3 @@ The full configuration reference, including world-loading arguments, is in
 - active implementation notes: [Agents/dev_log.md](Agents/dev_log.md)
 - implementation plan: [Agents/implementation_plan_ros2.md](Agents/implementation_plan_ros2.md)
 - native SDK implementation plan: [Agents/implementation_plan_native_unitree_sdk.md](Agents/implementation_plan_native_unitree_sdk.md)
-- previous SDK-oriented documentation: [README_unitree_sdk2py.md](README_unitree_sdk2py.md)

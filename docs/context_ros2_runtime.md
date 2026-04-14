@@ -12,7 +12,7 @@ lowcmd command application is disabled by default and native Unitree SDK
 `rt/lowcmd` is the active command source. The native bridge is documented in
 `context_native_bridge.md`.
 
-The shorter user-facing launch notes remain in `README.md`. This file is meant
+The shorter user-facing launch notes remain in `../README.md`. This file is meant
 to be the architecture reference you read when changing or debugging the
 system.
 
