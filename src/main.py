@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 
 from config import PROJECT_ROOT, AppConfig, parse_config
-from dds import DdsManager
+from dds import DdsManager, NativeUnitreeDdsManager
 from mapping import log_joint_validation_report, to_dds_ordered_snapshot, validate_live_joint_order
 from robot_control import RobotCommandApplier
 from robot_state import (
@@ -62,6 +62,7 @@ def perform_runtime_reset(
     world,
     state_reader: RobotStateReader,
     dds_manager: DdsManager | None,
+    native_dds_manager: NativeUnitreeDdsManager | None,
 ) -> None:
     """Reset the live runtime back to the canonical deterministic state."""
     LOGGER.info("triggering deterministic runtime reset")
@@ -70,6 +71,8 @@ def perform_runtime_reset(
     state_reader.apply_deterministic_reset_state()
     if dds_manager is not None:
         dds_manager.reset_runtime_state()
+    if native_dds_manager is not None:
+        native_dds_manager.reset_runtime_state()
     LOGGER.info("deterministic runtime reset complete")
 
 
@@ -82,6 +85,7 @@ def run_main_loop(
     reset_after_frames: int,
     state_reader: RobotStateReader,
     dds_manager: DdsManager | None,
+    native_dds_manager: NativeUnitreeDdsManager | None,
     command_applier: RobotCommandApplier | None,
     camera_controller: FollowCameraController | None,
     sim_clock_publisher: IsaacSimClockPublisher | None,
@@ -104,7 +108,7 @@ def run_main_loop(
             frame_count += 1
             simulation_time_seconds += physics_dt
             if reset_after_frames > 0 and not reset_triggered and frame_count >= reset_after_frames:
-                perform_runtime_reset(world, state_reader, dds_manager)
+                perform_runtime_reset(world, state_reader, dds_manager, native_dds_manager)
                 simulation_time_seconds = 0.0
                 reset_triggered = True
             if sim_clock_publisher is not None:
@@ -112,7 +116,7 @@ def run_main_loop(
             if livox_publisher is not None:
                 livox_publisher.step(simulation_time_seconds)
             snapshot = None
-            if dds_manager is not None or camera_controller is not None:
+            if dds_manager is not None or native_dds_manager is not None or camera_controller is not None:
                 try:
                     snapshot = state_reader.read_kinematic_snapshot(sample_dt=physics_dt)
                 except PhysicsViewUnavailableError:
@@ -121,6 +125,8 @@ def run_main_loop(
                     camera_controller.update(snapshot)
                 if snapshot is not None and dds_manager is not None:
                     dds_manager.step(simulation_time_seconds, snapshot)
+                if snapshot is not None and native_dds_manager is not None:
+                    native_dds_manager.step(simulation_time_seconds, snapshot)
             if max_frames > 0 and frame_count >= max_frames:
                 break
     except KeyboardInterrupt:
@@ -195,6 +201,8 @@ def main() -> int:
             config.enable_ros2_lowstate or config.enable_ros2_lowcmd
         )
         dds_manager = DdsManager(config) if ros2_dds_enabled else None
+        native_dds_enabled = config.enable_native_unitree_lowstate or config.enable_native_unitree_lowcmd
+        native_dds_manager = NativeUnitreeDdsManager(config) if native_dds_enabled else None
         command_applier = (
             RobotCommandApplier(
                 state_reader,
@@ -205,6 +213,8 @@ def main() -> int:
         )
         if dds_manager is not None:
             dds_manager.initialize()
+        if native_dds_manager is not None:
+            native_dds_manager.initialize()
         run_main_loop(
             simulation_app,
             world,
@@ -214,6 +224,7 @@ def main() -> int:
             config.reset_after_frames,
             state_reader,
             dds_manager,
+            native_dds_manager,
             command_applier,
             camera_controller,
             sim_clock_publisher,
@@ -225,6 +236,8 @@ def main() -> int:
     finally:
         if "dds_manager" in locals() and dds_manager is not None:
             dds_manager.shutdown()
+        if "native_dds_manager" in locals() and native_dds_manager is not None:
+            native_dds_manager.shutdown()
         if "livox_publisher" in locals() and livox_publisher is not None:
             livox_publisher.shutdown()
         if "sim_clock_publisher" in locals() and sim_clock_publisher is not None:

@@ -15,5 +15,6 @@ The current baseline body DDS surface is:
 """
 
 from .manager import DdsManager
+from .native_manager import NativeUnitreeDdsManager
 
-__all__ = ["DdsManager"]
+__all__ = ["DdsManager", "NativeUnitreeDdsManager"]
