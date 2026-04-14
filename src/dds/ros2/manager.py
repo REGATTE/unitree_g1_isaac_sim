@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import math
 import os
 from pathlib import Path
 import signal
@@ -14,9 +13,11 @@ from config import AppConfig
 from robot_state import RobotKinematicSnapshot
 from runtime_logging import get_logger
 
-from .g1_lowcmd import G1LowCmdSubscriber
-from .g1_lowstate import G1LowStatePublisher
-from .lowcmd_types import LowCmdCache
+from dds.common.lowcmd_types import LowCmdCache
+from dds.common.timing import CadenceTracker, compute_publish_period, is_fresh
+
+from .lowcmd import G1LowCmdSubscriber
+from .lowstate import G1LowStatePublisher
 
 
 LOGGER = get_logger("dds.manager")
@@ -31,46 +32,6 @@ class DdsStepResult:
     lowcmd_fresh: bool
 
 
-@dataclass
-class CadenceTracker:
-    """Track rolling lowstate cadence diagnostics."""
-
-    label: str
-    window_start_time: float | None = None
-    publish_count: int = 0
-
-    def record(self, t: float, expected_hz: float, interval: int, warn_ratio: float) -> None:
-        if interval <= 0:
-            return
-        if self.window_start_time is None:
-            self.window_start_time = t
-            self.publish_count = 1
-            return
-
-        self.publish_count += 1
-        if self.publish_count < interval:
-            return
-
-        elapsed = t - self.window_start_time
-        publishes = self.publish_count
-        observed_hz = 0.0 if elapsed <= 0.0 else (publishes - 1) / elapsed
-        relative_error = 0.0 if expected_hz <= 0.0 else abs(observed_hz - expected_hz) / expected_hz
-        log_method = LOGGER.warning if relative_error > warn_ratio else LOGGER.info
-        log_method(
-            "lowstate cadence check (%s): observed=%.3fHz expected=%.3fHz publishes=%s "
-            "window_dt=%.3fs rel_error=%.3f%%",
-            self.label,
-            observed_hz,
-            expected_hz,
-            publishes,
-            elapsed,
-            relative_error * 100.0,
-        )
-
-        self.window_start_time = t
-        self.publish_count = 1
-
-
 class DdsManager:
     """Own the DDS bridge lifecycle for the single-process simulator runtime."""
 
@@ -80,13 +41,7 @@ class DdsManager:
         self._sdk_enabled = False
         self._bridge_process: subprocess.Popen[str] | None = None
         self._next_lowstate_publish_time = 0.0
-        lowstate_hz = config.lowstate_publish_hz
-        if lowstate_hz <= 0.0 or not math.isfinite(lowstate_hz):
-            raise ValueError(
-                f"Invalid AppConfig.lowstate_publish_hz={lowstate_hz!r}; "
-                "expected a positive finite frequency in Hz (check --lowstate-publish-hz)."
-            )
-        self._lowstate_publish_period = _compute_publish_period(lowstate_hz)
+        self._lowstate_publish_period = compute_publish_period(config.lowstate_publish_hz)
         self._lowstate_publisher = G1LowStatePublisher(
             host=config.bridge_bind_host,
             port=config.bridge_lowstate_port,
@@ -231,8 +186,8 @@ class DdsManager:
             self._warned_stale_lowcmd = False
             return None
         cached = self._lowcmd_subscriber.latest_command
-        is_fresh = _is_fresh(now_monotonic, cached, self._config.lowcmd_timeout_seconds)
-        if not is_fresh:
+        fresh = is_fresh(now_monotonic, cached, self._config.lowcmd_timeout_seconds)
+        if not fresh:
             if cached is None:
                 self._warned_stale_lowcmd = False
                 return None
@@ -272,7 +227,7 @@ class DdsManager:
             return
 
         install_prefix = Path(self._config.unitree_ros2_install_prefix)
-        sidecar_script = Path(__file__).resolve().parents[2] / "scripts" / "ros2_cyclonedds_sidecar.py"
+        sidecar_script = Path(__file__).resolve().parents[3] / "scripts" / "ros2_cyclonedds_sidecar.py"
         ros2_python_exe = self._config.ros2_python_exe or "/usr/bin/python3"
         self._cleanup_stale_sidecars(sidecar_script)
         clean_env = {
@@ -299,7 +254,7 @@ class DdsManager:
         )
         self._bridge_process = subprocess.Popen(
             ["bash", "-lc", command],
-            cwd=Path(__file__).resolve().parents[2],
+            cwd=Path(__file__).resolve().parents[3],
             env=clean_env,
         )
         LOGGER.info(
@@ -378,21 +333,3 @@ class DdsManager:
         except PermissionError:
             return True
         return True
-
-
-def _compute_publish_period(publish_hz: float) -> float:
-    """Convert a positive publish rate into a simulation-time period."""
-    if publish_hz <= 0.0:
-        raise ValueError(f"lowstate publish rate must be positive, got {publish_hz}")
-    if not math.isfinite(publish_hz):
-        raise ValueError(f"lowstate publish rate must be finite, got {publish_hz}")
-    return 1.0 / publish_hz
-
-
-def _is_fresh(now_monotonic: float, cached: LowCmdCache | None, timeout_seconds: float) -> bool:
-    """Return whether a cached lowcmd sample should be treated as fresh."""
-    if cached is None:
-        return False
-    if timeout_seconds <= 0.0:
-        return True
-    return (now_monotonic - cached.received_at_monotonic) <= timeout_seconds

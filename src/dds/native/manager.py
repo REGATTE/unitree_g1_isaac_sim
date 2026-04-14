@@ -7,6 +7,7 @@ import math
 import os
 import platform
 from pathlib import Path
+import signal
 import subprocess
 import time
 
@@ -14,10 +15,11 @@ from config import AppConfig
 from robot_state import RobotKinematicSnapshot
 from runtime_logging import get_logger
 
-from .lowcmd_types import LowCmdCache
-from .manager import CadenceTracker, _compute_publish_period, _is_fresh
-from .native_udp_lowcmd import NativeLowCmdUdpSubscriber
-from .native_udp_lowstate import NativeLowStateUdpPublisher
+from dds.common.lowcmd_types import LowCmdCache
+from dds.common.timing import CadenceTracker, compute_publish_period, is_fresh
+
+from .lowcmd import NativeLowCmdUdpSubscriber
+from .lowstate import NativeLowStateUdpPublisher
 
 
 LOGGER = get_logger("dds.native_manager")
@@ -50,7 +52,7 @@ class NativeUnitreeDdsManager:
                 "expected a positive finite frequency in Hz."
             )
         self._next_lowstate_publish_time = 0.0
-        self._lowstate_publish_period = _compute_publish_period(lowstate_hz)
+        self._lowstate_publish_period = compute_publish_period(lowstate_hz)
         self._lowstate_publisher = NativeLowStateUdpPublisher(
             host=config.bridge_bind_host,
             port=NATIVE_UDP_LOWSTATE_PORT,
@@ -193,6 +195,7 @@ class NativeUnitreeDdsManager:
     def _start_bridge(self, bridge_executable: Path) -> None:
         if self._bridge_process is not None and self._bridge_process.poll() is None:
             return
+        self._cleanup_stale_bridges(bridge_executable)
         command = [
             str(bridge_executable),
             "--domain-id",
@@ -217,7 +220,7 @@ class NativeUnitreeDdsManager:
             )
         self._bridge_process = subprocess.Popen(
             command,
-            cwd=Path(__file__).resolve().parents[2],
+            cwd=Path(__file__).resolve().parents[3],
             env=self._bridge_environment(bridge_executable),
             text=True,
         )
@@ -242,13 +245,89 @@ class NativeUnitreeDdsManager:
             LOGGER.error("native Unitree bridge exited unexpectedly with code %s", return_code)
             self._sdk_enabled = False
 
+    def _cleanup_stale_bridges(self, bridge_executable: Path) -> None:
+        """Terminate leftover native bridge processes from prior simulator runs."""
+        candidate_pids = self._find_stale_bridge_pids(bridge_executable)
+        if not candidate_pids:
+            return
+
+        LOGGER.warning(
+            "terminating %s stale native Unitree bridge process(es) before startup: %s",
+            len(candidate_pids),
+            ", ".join(str(pid) for pid in candidate_pids),
+        )
+        for pid in candidate_pids:
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except ProcessLookupError:
+                continue
+
+        deadline = time.monotonic() + 2.0
+        remaining = set(candidate_pids)
+        while remaining and time.monotonic() < deadline:
+            time.sleep(0.05)
+            remaining = {pid for pid in remaining if self._pid_exists(pid)}
+
+        for pid in sorted(remaining):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                continue
+
+    def _find_stale_bridge_pids(self, bridge_executable: Path) -> list[int]:
+        """Return PIDs for matching native bridge binaries that predate this manager."""
+        try:
+            result = subprocess.run(
+                ["ps", "-eo", "pid=,args="],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return []
+
+        bridge_tokens = {str(bridge_executable)}
+        try:
+            bridge_tokens.add(str(bridge_executable.resolve()))
+        except OSError:
+            pass
+        bridge_tokens.add(bridge_executable.name)
+        current_pid = os.getpid()
+        active_bridge_pid = self._bridge_process.pid if self._bridge_process is not None else None
+        pids: list[int] = []
+        for line in result.stdout.splitlines():
+            stripped = line.strip()
+            if not stripped or not any(token in stripped for token in bridge_tokens):
+                continue
+            pid_text, _, command = stripped.partition(" ")
+            if not any(token in command for token in bridge_tokens):
+                continue
+            try:
+                pid = int(pid_text)
+            except ValueError:
+                continue
+            if pid == current_pid or pid == active_bridge_pid:
+                continue
+            pids.append(pid)
+        return pids
+
+    @staticmethod
+    def _pid_exists(pid: int) -> bool:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
+
     def _resolve_latest_lowcmd(self, now_monotonic: float) -> LowCmdCache | None:
         if not self._config.enable_native_unitree_lowcmd:
             self._warned_stale_lowcmd = False
             return None
         cached = self._lowcmd_subscriber.latest_command
-        is_fresh = _is_fresh(now_monotonic, cached, self._config.lowcmd_timeout_seconds)
-        if not is_fresh:
+        fresh = is_fresh(now_monotonic, cached, self._config.lowcmd_timeout_seconds)
+        if not fresh:
             if cached is None:
                 self._warned_stale_lowcmd = False
                 return None

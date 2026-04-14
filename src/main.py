@@ -12,7 +12,7 @@ import logging
 
 from config import PROJECT_ROOT, AppConfig, parse_config
 from dds import DdsManager, NativeUnitreeDdsManager
-from dds.lowcmd_types import LowCmdCache
+from dds.common.lowcmd_types import LowCmdCache
 from mapping import log_joint_validation_report, to_dds_ordered_snapshot, validate_live_joint_order
 from robot_control import RobotCommandApplier
 from robot_state import (

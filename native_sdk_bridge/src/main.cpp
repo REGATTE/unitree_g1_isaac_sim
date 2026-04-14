@@ -108,7 +108,8 @@ int main(int argc, char* argv[]) {
             << ")" << std::endl;
 
   native_sdk_bridge::LowStatePublisher publisher;
-  if (options.enable_lowstate && !publisher.initialize(options.domain_id, options.lowstate_topic)) {
+  if (options.enable_lowstate &&
+      !publisher.initialize(options.domain_id, options.lowstate_topic, options.bind_host, options.lowstate_port)) {
     if (socket_fd >= 0) {
       close(socket_fd);
     }

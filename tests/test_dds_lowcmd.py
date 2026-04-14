@@ -10,8 +10,8 @@ SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from dds.bridge_protocol import encode_lowcmd_packet
-from dds.g1_lowcmd import G1LowCmdSubscriber
+from dds.ros2.bridge_protocol import encode_lowcmd_packet
+from dds.ros2.lowcmd import G1LowCmdSubscriber
 from mapping.joints import BODY_JOINT_COUNT, G1_29DOF_JOINT_MAPPING
 
 
@@ -26,7 +26,7 @@ class G1LowCmdSubscriberTests(unittest.TestCase):
             None,
         ]
 
-        with patch("dds.g1_lowcmd.socket.socket", return_value=fake_socket):
+        with patch("dds.ros2.lowcmd.socket.socket", return_value=fake_socket):
             subscriber.initialize()
             self.assertNotEqual(subscriber.bound_port, busy_port)
             self.assertEqual(fake_socket.bind.call_args_list[0].args[0], ("127.0.0.1", busy_port))

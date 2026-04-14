@@ -1,6 +1,7 @@
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -9,8 +10,8 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from config import AppConfig
-from dds.native_manager import NativeUnitreeDdsManager
-from dds.lowcmd_types import LowCmdCache
+from dds.common.lowcmd_types import LowCmdCache
+from dds.native.manager import NativeUnitreeDdsManager
 
 
 class _FakeNativeLowStatePublisher:
@@ -187,6 +188,44 @@ class NativeUnitreeDdsManagerTests(unittest.TestCase):
         self.assertEqual(manager._lowcmd_subscriber.poll_calls, 1)
         self.assertTrue(result.lowcmd_available)
         self.assertTrue(result.lowcmd_fresh)
+
+    def test_find_stale_bridge_pids_matches_bridge_binary_and_skips_current_processes(self):
+        manager = NativeUnitreeDdsManager(_build_config())
+        bridge_exe = Path("/tmp/unitree_g1_native_bridge")
+        ps_output = "\n".join(
+            [
+                "111 /tmp/unitree_g1_native_bridge --domain-id 1",
+                "222 /usr/bin/python3 other_process.py",
+                f"333 {sys.executable} {bridge_exe.name}-test-helper.py",
+            ]
+        )
+
+        with patch("dds.native.manager.os.getpid", return_value=333):
+            with patch("dds.native.manager.subprocess.run") as run_mock:
+                run_mock.return_value.stdout = ps_output
+                pids = manager._find_stale_bridge_pids(bridge_exe)
+
+        self.assertEqual(pids, [111])
+
+    def test_cleanup_stale_bridges_terminates_then_kills_remaining_processes(self):
+        manager = NativeUnitreeDdsManager(_build_config())
+        bridge_exe = Path("/tmp/unitree_g1_native_bridge")
+        exists_calls = []
+
+        def fake_pid_exists(pid):
+            exists_calls.append(pid)
+            return True
+
+        with patch.object(manager, "_find_stale_bridge_pids", return_value=[111]):
+            with patch.object(manager, "_pid_exists", side_effect=fake_pid_exists):
+                with patch("dds.native.manager.os.kill") as kill_mock:
+                    with patch("dds.native.manager.time.monotonic", side_effect=[0.0, 1.0, 3.0]):
+                        manager._cleanup_stale_bridges(bridge_exe)
+
+        kill_calls = [call.args for call in kill_mock.call_args_list]
+        self.assertEqual(kill_calls[0], (111, 15))
+        self.assertEqual(kill_calls[1], (111, 9))
+        self.assertEqual(exists_calls, [111])
 
 
 if __name__ == "__main__":

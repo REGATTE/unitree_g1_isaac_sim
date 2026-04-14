@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from dds.lowcmd_types import LowCmdCache
+from dds.common.lowcmd_types import LowCmdCache
 from robot_state import PhysicsViewUnavailableError, RobotStateReader
 from runtime_logging import get_logger
 

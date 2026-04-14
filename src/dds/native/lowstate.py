@@ -8,7 +8,7 @@ import socket
 from robot_state import RobotKinematicSnapshot
 from runtime_logging import get_logger
 
-from .native_bridge_protocol import encode_native_lowstate_packet
+from .bridge_protocol import encode_native_lowstate_packet
 
 
 LOGGER = get_logger("dds.native_lowstate")

@@ -10,7 +10,7 @@ import time
 from mapping.joints import BODY_JOINT_COUNT
 from runtime_logging import get_logger
 from .bridge_protocol import decode_lowcmd_packet
-from .lowcmd_types import LowCmdCache
+from dds.common.lowcmd_types import LowCmdCache
 
 LOGGER = get_logger("dds.lowcmd")
 

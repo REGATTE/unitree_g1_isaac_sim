@@ -8,7 +8,7 @@ SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from dds.bridge_protocol import decode_lowstate_packet, encode_lowstate_packet
+from dds.ros2.bridge_protocol import decode_lowstate_packet, encode_lowstate_packet
 from mapping.joints import SIM_G1_29DOF_JOINT_NAMES
 from robot_state import RobotKinematicSnapshot
 

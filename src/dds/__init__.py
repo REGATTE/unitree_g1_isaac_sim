@@ -14,7 +14,7 @@ The current baseline body DDS surface is:
 - explicit stale-command handling at the DDS manager boundary
 """
 
-from .manager import DdsManager
-from .native_manager import NativeUnitreeDdsManager
+from .native import NativeUnitreeDdsManager
+from .ros2 import DdsManager
 
 __all__ = ["DdsManager", "NativeUnitreeDdsManager"]

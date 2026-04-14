@@ -12,8 +12,8 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from config import AppConfig
-from dds.lowcmd_types import LowCmdCache
-from dds.manager import DdsManager
+from dds.common.lowcmd_types import LowCmdCache
+from dds.ros2.manager import DdsManager
 
 
 class _FakeLowCmdSubscriber:
@@ -155,7 +155,7 @@ class DdsManagerTests(unittest.TestCase):
     def test_cadence_reporting_emits_observed_rate(self):
         manager = DdsManager(_build_config())
 
-        with self.assertLogs("unitree_g1_isaac_sim.dds.manager", level="INFO") as captured:
+        with self.assertLogs("unitree_g1_isaac_sim.dds.timing", level="INFO") as captured:
             manager._simulation_cadence.record(0.00, expected_hz=100.0, interval=3, warn_ratio=0.05)
             manager._simulation_cadence.record(0.01, expected_hz=100.0, interval=3, warn_ratio=0.05)
             manager._simulation_cadence.record(0.02, expected_hz=100.0, interval=3, warn_ratio=0.05)
@@ -167,7 +167,7 @@ class DdsManagerTests(unittest.TestCase):
     def test_wall_clock_cadence_reporting_emits_distinct_label(self):
         manager = DdsManager(_build_config())
 
-        with self.assertLogs("unitree_g1_isaac_sim.dds.manager", level="INFO") as captured:
+        with self.assertLogs("unitree_g1_isaac_sim.dds.timing", level="INFO") as captured:
             manager._wall_clock_cadence.record(10.00, expected_hz=100.0, interval=3, warn_ratio=0.05)
             manager._wall_clock_cadence.record(10.01, expected_hz=100.0, interval=3, warn_ratio=0.05)
             manager._wall_clock_cadence.record(10.02, expected_hz=100.0, interval=3, warn_ratio=0.05)
@@ -266,7 +266,7 @@ class DdsManagerTests(unittest.TestCase):
             ]
         )
 
-        with patch("dds.manager.subprocess.run") as run_mock:
+        with patch("dds.ros2.manager.subprocess.run") as run_mock:
             run_mock.return_value.stdout = ps_output
             stale = manager._find_stale_sidecar_pids(sidecar_script)
 

@@ -23,6 +23,8 @@ using unitree_hg::msg::dds_::LowState_;
 struct LowStatePublisher::Impl {
   int domain_id{0};
   std::string topic;
+  std::string udp_host;
+  int udp_port{0};
   bool initialized{false};
   ChannelPublisherPtr<LowState_> publisher;
 };
@@ -88,20 +90,25 @@ LowStatePublisher::LowStatePublisher() = default;
 
 LowStatePublisher::~LowStatePublisher() = default;
 
-bool LowStatePublisher::initialize(int domain_id, const std::string& topic) {
+bool LowStatePublisher::initialize(int domain_id, const std::string& topic, const std::string& udp_host, int udp_port) {
   if (impl_ && impl_->initialized) {
     return true;
   }
   impl_ = std::make_unique<Impl>();
   impl_->domain_id = domain_id;
   impl_->topic = topic;
+  impl_->udp_host = udp_host;
+  impl_->udp_port = udp_port;
 
   ChannelFactory::Instance()->Init(domain_id, "");
   impl_->publisher = std::make_shared<ChannelPublisher<LowState_>>(topic);
   impl_->publisher->InitChannel();
   impl_->initialized = true;
   std::cerr << "native lowstate publisher initialized (domain_id=" << impl_->domain_id
-            << ", topic=" << impl_->topic << ")" << std::endl;
+            << ", topic=" << impl_->topic
+            << ", udp_host=" << impl_->udp_host
+            << ", udp_port=" << impl_->udp_port
+            << ")" << std::endl;
   return true;
 }
 
