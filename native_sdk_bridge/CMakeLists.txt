@@ -51,6 +51,12 @@ target_link_libraries(unitree_g1_native_bridge
     Threads::Threads
 )
 
+target_link_options(unitree_g1_native_bridge
+  PRIVATE
+    "-Wl,--disable-new-dtags"
+)
+
 set_target_properties(unitree_g1_native_bridge PROPERTIES
   BUILD_RPATH "${UNITREE_SDK2_ROOT}/thirdparty/lib/${UNITREE_SDK2_ARCH}"
+  INSTALL_RPATH "${UNITREE_SDK2_ROOT}/thirdparty/lib/${UNITREE_SDK2_ARCH}"
 )

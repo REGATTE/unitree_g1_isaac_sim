@@ -82,6 +82,8 @@ The intended external flow is:
 - ROS 2 Humble available on the host
 - `unitree_ros2` built locally, with the install prefix available
 - CycloneDDS middleware available through ROS 2
+- Optional native Unitree C++ SDK bridge support requires `unitree_sdk2` built
+  locally
 
 Expected local `unitree_ros2` install prefix:
 
@@ -91,6 +93,52 @@ You can also override that path with:
 
 - `UNITREE_ROS2_INSTALL_PREFIX`
 - `--unitree-ros2-install-prefix`
+
+Expected local `unitree_sdk2` checkout/build for native bridge support:
+
+- `~/unitree_sdk2`
+
+## Native Unitree SDK Bridge Build
+
+The native C++ bridge lives in `native_sdk_bridge/` and links against
+`unitree_sdk2`. Build `unitree_sdk2` first, then build the simulator bridge:
+
+```bash
+cmake -S native_sdk_bridge -B native_sdk_bridge/build
+cmake --build native_sdk_bridge/build -j4
+```
+
+The default simulator config expects the bridge executable at:
+
+```text
+native_sdk_bridge/build/unitree_g1_native_bridge
+```
+
+If your SDK checkout is not at `~/unitree_sdk2`, pass the root explicitly:
+
+```bash
+cmake -S native_sdk_bridge -B native_sdk_bridge/build \
+  -DUNITREE_SDK2_ROOT=/path/to/unitree_sdk2
+cmake --build native_sdk_bridge/build -j4
+```
+
+Verify that the bridge resolves both CycloneDDS libraries from the Unitree SDK2
+thirdparty directory, not from ROS 2:
+
+```bash
+ldd native_sdk_bridge/build/unitree_g1_native_bridge | grep ddsc
+```
+
+Expected:
+
+```text
+libddsc.so.0 => /home/<user>/unitree_sdk2/thirdparty/lib/<arch>/libddsc.so.0
+libddscxx.so.0 => /home/<user>/unitree_sdk2/thirdparty/lib/<arch>/libddscxx.so.0
+```
+
+If `libddsc.so.0` resolves from `/opt/ros/humble`, the bridge may crash at
+startup with `free(): invalid pointer`. See [docs/issues.md](docs/issues.md)
+for the troubleshooting note.
 
 ## Runtime Notes
 
@@ -230,6 +278,7 @@ The full configuration reference, including world-loading arguments, is in
 ## Documentation
 
 - configuration reference: [config.md](config.md)
+- known issues and setup notes: [docs/issues.md](docs/issues.md)
 - active implementation notes: [Agents/dev_log.md](Agents/dev_log.md)
 - implementation plan: [Agents/implementation_plan_ros2.md](Agents/implementation_plan_ros2.md)
 - previous SDK-oriented documentation: [README_unitree_sdk2py.md](README_unitree_sdk2py.md)

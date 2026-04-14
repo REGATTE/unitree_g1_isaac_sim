@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
+import os
+import platform
 from pathlib import Path
 import subprocess
 import time
@@ -175,8 +177,21 @@ class NativeUnitreeDdsManager:
         self._bridge_process = subprocess.Popen(
             command,
             cwd=Path(__file__).resolve().parents[2],
+            env=self._bridge_environment(bridge_executable),
             text=True,
         )
+
+    def _bridge_environment(self, bridge_executable: Path) -> dict[str, str]:
+        env = dict(os.environ)
+        sdk_thirdparty_lib = _resolve_unitree_sdk2_thirdparty_lib(bridge_executable)
+        if sdk_thirdparty_lib is None:
+            return env
+        existing = env.get("LD_LIBRARY_PATH", "")
+        entries = [str(sdk_thirdparty_lib)]
+        if existing:
+            entries.append(existing)
+        env["LD_LIBRARY_PATH"] = os.pathsep.join(entries)
+        return env
 
     def _poll_bridge_health(self) -> None:
         if self._bridge_process is None:
@@ -189,3 +204,18 @@ class NativeUnitreeDdsManager:
     def _advance_lowstate_publish_schedule(self, simulation_time_seconds: float) -> None:
         while self._next_lowstate_publish_time <= simulation_time_seconds:
             self._next_lowstate_publish_time += self._lowstate_publish_period
+
+
+def _resolve_unitree_sdk2_thirdparty_lib(bridge_executable: Path) -> Path | None:
+    """Find the bundled Unitree SDK2 DDS library directory for bridge startup."""
+    arch = platform.machine()
+    candidates = [
+        Path.home() / "unitree_sdk2" / "thirdparty" / "lib" / arch,
+        bridge_executable.parents[2] / "thirdparty" / "lib" / arch
+        if len(bridge_executable.parents) > 2
+        else None,
+    ]
+    for candidate in candidates:
+        if candidate is not None and (candidate / "libddsc.so").exists() and (candidate / "libddscxx.so").exists():
+            return candidate
+    return None
