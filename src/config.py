@@ -61,11 +61,18 @@ class AppConfig:
     print_all_joints: bool
     enable_dds: bool
     dds_domain_id: int
+    enable_ros2_lowstate: bool
+    enable_ros2_lowcmd: bool
     lowstate_topic: str
     lowcmd_topic: str
     lowstate_publish_hz: float
     lowcmd_max_position_delta_rad: float
-    enable_lowcmd_subscriber: bool
+    enable_native_unitree_lowstate: bool
+    enable_native_unitree_lowcmd: bool
+    native_unitree_domain_id: int | None
+    native_unitree_lowstate_topic: str
+    native_unitree_lowcmd_topic: str
+    native_unitree_bridge_exe: Path
     lowcmd_timeout_seconds: float
     lowstate_cadence_report_interval: int
     lowstate_cadence_warn_ratio: float
@@ -263,6 +270,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Cyclone DDS domain id passed to the Unitree SDK channel factory.",
     )
     parser.add_argument(
+        "--enable-ros2-lowstate",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Publish ROS 2 `rt/lowstate` through the existing sidecar path. Enabled by default.",
+    )
+    parser.add_argument(
+        "--enable-ros2-lowcmd",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Accept ROS 2 `rt/lowcmd` through the existing sidecar path. Disabled by default.",
+    )
+    parser.add_argument(
         "--lowstate-topic",
         type=str,
         default="rt/lowstate",
@@ -291,13 +310,40 @@ def build_arg_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "--enable-lowcmd-subscriber",
+        "--enable-native-unitree-lowstate",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help=(
-            "Create the `rt/lowcmd` subscriber and apply accepted body commands "
-            "into the live articulation. Enabled by default."
-        ),
+        help="Enable native Unitree SDK `rt/lowstate` publication. Enabled by default.",
+    )
+    parser.add_argument(
+        "--enable-native-unitree-lowcmd",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable native Unitree SDK `rt/lowcmd` ingress. Enabled by default.",
+    )
+    parser.add_argument(
+        "--native-unitree-domain-id",
+        type=int,
+        default=None,
+        help="DDS domain id for the native Unitree SDK bridge. Defaults to --dds-domain-id.",
+    )
+    parser.add_argument(
+        "--native-unitree-lowstate-topic",
+        type=str,
+        default="rt/lowstate",
+        help="Topic used for native Unitree SDK lowstate publication.",
+    )
+    parser.add_argument(
+        "--native-unitree-lowcmd-topic",
+        type=str,
+        default="rt/lowcmd",
+        help="Topic used for native Unitree SDK lowcmd subscription.",
+    )
+    parser.add_argument(
+        "--native-unitree-bridge-exe",
+        type=Path,
+        default=PROJECT_ROOT / "native_sdk_bridge" / "build" / "unitree_g1_native_bridge",
+        help="Path to the compiled native Unitree SDK bridge sidecar executable.",
     )
     parser.add_argument(
         "--lowcmd-timeout-seconds",
@@ -470,12 +516,21 @@ def parse_config(argv: list[str] | None = None) -> AppConfig:
         )
     if args.lowcmd_max_position_delta_rad < 0.0 or not math.isfinite(args.lowcmd_max_position_delta_rad):
         parser.error("--lowcmd-max-position-delta-rad must be a finite non-negative float.")
+    if args.enable_ros2_lowcmd and args.enable_native_unitree_lowcmd:
+        parser.error(
+            "multiple lowcmd sources enabled: ROS 2 sidecar and native Unitree SDK. "
+            "Enable only one lowcmd source at a time."
+        )
     for label, value in (
         ("--livox-lidar-topic", args.livox_lidar_topic),
         ("--livox-lidar-frame-id", args.livox_lidar_frame_id),
         ("--livox-lidar-parent-link-name", args.livox_lidar_parent_link_name),
         ("--livox-lidar-prim-name", args.livox_lidar_prim_name),
         ("--livox-lidar-sensor-prim-name", args.livox_lidar_sensor_prim_name),
+        ("--lowstate-topic", args.lowstate_topic),
+        ("--lowcmd-topic", args.lowcmd_topic),
+        ("--native-unitree-lowstate-topic", args.native_unitree_lowstate_topic),
+        ("--native-unitree-lowcmd-topic", args.native_unitree_lowcmd_topic),
     ):
         if not value.strip():
             parser.error(f"{label} cannot be empty.")
@@ -502,11 +557,18 @@ def parse_config(argv: list[str] | None = None) -> AppConfig:
         print_all_joints=args.print_all_joints,
         enable_dds=args.enable_dds,
         dds_domain_id=args.dds_domain_id,
+        enable_ros2_lowstate=args.enable_ros2_lowstate,
+        enable_ros2_lowcmd=args.enable_ros2_lowcmd,
         lowstate_topic=args.lowstate_topic,
         lowcmd_topic=args.lowcmd_topic,
         lowstate_publish_hz=args.lowstate_publish_hz,
         lowcmd_max_position_delta_rad=args.lowcmd_max_position_delta_rad,
-        enable_lowcmd_subscriber=args.enable_lowcmd_subscriber,
+        enable_native_unitree_lowstate=args.enable_native_unitree_lowstate,
+        enable_native_unitree_lowcmd=args.enable_native_unitree_lowcmd,
+        native_unitree_domain_id=args.native_unitree_domain_id or args.dds_domain_id,
+        native_unitree_lowstate_topic=args.native_unitree_lowstate_topic,
+        native_unitree_lowcmd_topic=args.native_unitree_lowcmd_topic,
+        native_unitree_bridge_exe=args.native_unitree_bridge_exe,
         lowcmd_timeout_seconds=args.lowcmd_timeout_seconds,
         lowstate_cadence_report_interval=args.lowstate_cadence_report_interval,
         lowstate_cadence_warn_ratio=args.lowstate_cadence_warn_ratio,

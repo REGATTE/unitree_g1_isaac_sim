@@ -14,8 +14,9 @@ from config import AppConfig
 from robot_state import RobotKinematicSnapshot
 from runtime_logging import get_logger
 
-from .g1_lowcmd import G1LowCmdSubscriber, LowCmdCache
+from .g1_lowcmd import G1LowCmdSubscriber
 from .g1_lowstate import G1LowStatePublisher
+from .lowcmd_types import LowCmdCache
 
 
 LOGGER = get_logger("dds.manager")
@@ -100,7 +101,7 @@ class DdsManager:
 
     @property
     def latest_lowcmd(self) -> LowCmdCache | None:
-        if not self._config.enable_lowcmd_subscriber:
+        if not self._config.enable_ros2_lowcmd:
             return None
         return self._resolve_latest_lowcmd(now_monotonic=time.monotonic())
 
@@ -121,12 +122,15 @@ class DdsManager:
             return False
 
         try:
-            if self._config.enable_lowcmd_subscriber:
+            if self._config.enable_ros2_lowcmd:
                 self._lowcmd_subscriber.initialize()
             else:
-                LOGGER.info("lowcmd subscriber disabled for this run")
+                LOGGER.info("ROS 2 lowcmd subscriber disabled for this run")
             self._start_sidecar_bridge()
-            self._lowstate_publisher.initialize()
+            if self._config.enable_ros2_lowstate:
+                self._lowstate_publisher.initialize()
+            else:
+                LOGGER.info("ROS 2 lowstate publisher disabled for this run")
             self._sdk_enabled = True
             LOGGER.info(
                 "initialized localhost DDS sidecar bridge (domain_id=%s)",
@@ -147,11 +151,15 @@ class DdsManager:
 
         if self._sdk_enabled:
             self._poll_sidecar_health()
-            if self._config.enable_lowcmd_subscriber:
+            if self._config.enable_ros2_lowcmd:
                 self._lowcmd_subscriber.poll()
 
         lowstate_published = False
-        if self._sdk_enabled and simulation_time_seconds >= self._next_lowstate_publish_time:
+        if (
+            self._sdk_enabled
+            and self._config.enable_ros2_lowstate
+            and simulation_time_seconds >= self._next_lowstate_publish_time
+        ):
             lowstate_published = self._lowstate_publisher.publish(snapshot)
             self._advance_lowstate_publish_schedule(simulation_time_seconds)
             if lowstate_published:
@@ -174,7 +182,7 @@ class DdsManager:
         return DdsStepResult(
             lowstate_published=lowstate_published,
             lowcmd_available=(
-                self._config.enable_lowcmd_subscriber
+                self._config.enable_ros2_lowcmd
                 and self._lowcmd_subscriber.latest_command is not None
             ),
             lowcmd_fresh=active_lowcmd is not None,
@@ -219,7 +227,7 @@ class DdsManager:
 
     def _resolve_latest_lowcmd(self, now_monotonic: float) -> LowCmdCache | None:
         """Return the current fresh lowcmd sample or `None` if stale/absent."""
-        if not self._config.enable_lowcmd_subscriber:
+        if not self._config.enable_ros2_lowcmd:
             self._warned_stale_lowcmd = False
             return None
         cached = self._lowcmd_subscriber.latest_command

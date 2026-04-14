@@ -12,7 +12,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from config import AppConfig
-from dds.g1_lowcmd import LowCmdCache
+from dds.lowcmd_types import LowCmdCache
 from dds.manager import DdsManager
 
 
@@ -69,11 +69,18 @@ def _build_config(**overrides) -> AppConfig:
         print_all_joints=False,
         enable_dds=True,
         dds_domain_id=1,
+        enable_ros2_lowstate=True,
+        enable_ros2_lowcmd=True,
         lowstate_topic="rt/lowstate",
         lowcmd_topic="rt/lowcmd",
         lowstate_publish_hz=100.0,
         lowcmd_max_position_delta_rad=0.25,
-        enable_lowcmd_subscriber=True,
+        enable_native_unitree_lowstate=True,
+        enable_native_unitree_lowcmd=False,
+        native_unitree_domain_id=1,
+        native_unitree_lowstate_topic="rt/lowstate",
+        native_unitree_lowcmd_topic="rt/lowcmd",
+        native_unitree_bridge_exe=Path("/tmp/unitree_g1_native_bridge"),
         lowcmd_timeout_seconds=0.5,
         lowstate_cadence_report_interval=3,
         lowstate_cadence_warn_ratio=0.05,
@@ -223,7 +230,7 @@ class DdsManagerTests(unittest.TestCase):
         self.assertEqual(manager._wall_clock_cadence.publish_count, 0)
 
     def test_step_does_not_poll_lowcmd_when_subscriber_disabled(self):
-        manager = DdsManager(_build_config(enable_lowcmd_subscriber=False))
+        manager = DdsManager(_build_config(enable_ros2_lowcmd=False))
         manager._initialized = True
         manager._sdk_enabled = True
         manager._lowstate_publisher = _FakeLowStatePublisher()

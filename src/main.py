@@ -191,13 +191,16 @@ def main() -> int:
                 camera_controller.update(state_reader.read_kinematic_snapshot(sample_dt=config.physics_dt))
             except PhysicsViewUnavailableError:
                 LOGGER.warning("initial follow camera update skipped because robot physics view is unavailable")
-        dds_manager = DdsManager(config) if config.enable_dds else None
+        ros2_dds_enabled = config.enable_dds and (
+            config.enable_ros2_lowstate or config.enable_ros2_lowcmd
+        )
+        dds_manager = DdsManager(config) if ros2_dds_enabled else None
         command_applier = (
             RobotCommandApplier(
                 state_reader,
                 max_position_delta_rad=config.lowcmd_max_position_delta_rad,
             )
-            if config.enable_dds
+            if (config.enable_ros2_lowcmd or config.enable_native_unitree_lowcmd)
             else None
         )
         if dds_manager is not None:

@@ -1,58 +1,18 @@
-"""Local lowcmd subscription boundary between the ROS 2 sidecar and Isaac Sim."""
+"""Local ROS 2 lowcmd subscription boundary between the sidecar and Isaac Sim."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import errno
 from functools import lru_cache
 import socket
 import time
 
 from mapping.joints import BODY_JOINT_COUNT
-from mapping import reorder_dds_values_to_sim
 from runtime_logging import get_logger
 from .bridge_protocol import decode_lowcmd_packet
+from .lowcmd_types import LowCmdCache
 
 LOGGER = get_logger("dds.lowcmd")
-
-
-@dataclass(frozen=True)
-class SimOrderLowCmd:
-    """Body-joint command vectors in simulator joint order."""
-
-    positions: list[float]
-    velocities: list[float]
-    torques: list[float]
-    kp: list[float]
-    kd: list[float]
-
-
-@dataclass(frozen=True)
-class LowCmdCache:
-    """Validated raw body command cache from the DDS boundary."""
-
-    mode_pr: int
-    mode_machine: int
-    joint_positions_dds: tuple[float, ...]
-    joint_velocities_dds: tuple[float, ...]
-    joint_torques_dds: tuple[float, ...]
-    joint_kp_dds: tuple[float, ...]
-    joint_kd_dds: tuple[float, ...]
-    received_at_monotonic: float
-
-    def to_sim_order(self) -> SimOrderLowCmd:
-        """Return body-joint command vectors in simulator joint order.
-
-        Keeping the DDS-to-simulator remap here ensures the rest of the runtime
-        only handles simulator-order control vectors.
-        """
-        return SimOrderLowCmd(
-            positions=reorder_dds_values_to_sim(self.joint_positions_dds),
-            velocities=reorder_dds_values_to_sim(self.joint_velocities_dds),
-            torques=reorder_dds_values_to_sim(self.joint_torques_dds),
-            kp=reorder_dds_values_to_sim(self.joint_kp_dds),
-            kd=reorder_dds_values_to_sim(self.joint_kd_dds),
-        )
 
 
 class G1LowCmdSubscriber:
