@@ -16,5 +16,6 @@ The current baseline body DDS surface is:
 
 from .native import NativeUnitreeDdsManager
 from .ros2 import DdsManager
+from .sdk2py import UnitreeSdk2PyDdsManager
 
-__all__ = ["DdsManager", "NativeUnitreeDdsManager"]
+__all__ = ["DdsManager", "NativeUnitreeDdsManager", "UnitreeSdk2PyDdsManager"]

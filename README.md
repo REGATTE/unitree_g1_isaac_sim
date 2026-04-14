@@ -1,8 +1,8 @@
 
 # unitree_g1_isaac_sim
 
-Isaac Sim environment for the Unitree G1 with parallel ROS 2 and native
-Unitree SDK bridge paths for low-level state and command exchange.
+Isaac Sim environment for the Unitree G1 with ROS 2, Unitree SDK2 Python, and
+native C++ Unitree SDK bridge paths for low-level state and command exchange.
 
 This README is user-facing. Implementation progress and branch notes are
 tracked in [Agents/dev_log.md](Agents/dev_log.md).
@@ -13,7 +13,8 @@ The current low-level integration path uses:
 
 - Isaac Sim for robot state extraction and command application
 - a localhost sidecar bridge for ROS 2 `unitree_hg` message I/O
-- a native C++ Unitree SDK sidecar bridge for SDK-level DDS I/O
+- a Unitree SDK2 Python sidecar bridge for default policy-facing lowstate I/O
+- an optional native C++ Unitree SDK sidecar bridge for SDK-level DDS I/O
 - Isaac's native ROS 2 bridge for high-bandwidth simulated sensor topics
 - `unitree_ros2` message definitions (`unitree_hg`)
 - CycloneDDS as the ROS 2 middleware
@@ -21,15 +22,19 @@ The current low-level integration path uses:
 The current default command-authority mode is:
 
 - ROS 2 lowstate enabled: simulator publishes `/rt/lowstate`
-- native Unitree lowstate enabled: simulator publishes SDK `rt/lowstate`
-- native Unitree lowcmd enabled: SDK `rt/lowcmd` drives the simulator
+- SDK2 Python lowstate enabled: simulator publishes SDK `rt/lowstate`
+- SDK2 Python lowcmd selected: SDK2 Python `rt/lowcmd` support lands in Phase 2
+- native C++ Unitree SDK runtime disabled unless explicitly enabled
 - ROS 2 lowcmd disabled: `/rt/lowcmd` is not the active command source
 
 The intended external flow is:
 
 - ROS 2 state out: Isaac Sim -> ROS 2 sidecar -> `/rt/lowstate`
-- native SDK state out: Isaac Sim -> native SDK sidecar -> `rt/lowstate`
-- native SDK command ingress: `rt/lowcmd` -> native SDK sidecar -> Isaac Sim
+- SDK2 Python state out: Isaac Sim -> SDK2 Python sidecar -> `rt/lowstate`
+- SDK2 Python command ingress: `rt/lowcmd` -> SDK2 Python sidecar -> Isaac Sim
+  after Phase 2
+- native C++ SDK state/command path is still available as an alternate runtime
+  mode, but it is mutually exclusive with SDK2 Python
 - simulated LiDAR out: Isaac RTX LiDAR -> Isaac ROS 2 bridge -> ROS 2 apps
 
 ## Architecture
@@ -47,32 +52,40 @@ The intended external flow is:
                               | - apply commands     |
                               +----------+-----------+
                                          |
-                    +--------------------+--------------------+
-                    |                                         |
-                    v                                         v
-  +------------------------------------+    +------------------------------------+
-  | ROS 2 Sidecar Bridge              |    | Native Unitree SDK Sidecar         |
-  | (system Python)                   |    | (system C++)                       |
-  |                                    |    |                                    |
-  | - unitree_hg/msg/LowState pub     |    | - LowState_ publisher              |
-  | - unitree_hg/msg/LowCmd sub       |    | - LowCmd_ subscriber               |
-  | - rclpy + CycloneDDS              |    | - Unitree SDK2 DDS                 |
-  | - UDP: 127.0.0.1:35501/35502      |    | - UDP: 127.0.0.1:35511/35512       |
-  +----------------+-------------------+    +----------------+-------------------+
-                   |                                         |
-                   v                                         v
-  +------------------------------------+    +------------------------------------+
-  | ROS 2 / CycloneDDS                |    | Unitree SDK DDS                   |
-  |                                    |    |                                    |
-  | - /rt/lowstate                    |    | - rt/lowstate                     |
-  | - /rt/lowcmd optional/test path   |    | - rt/lowcmd active default path   |
-  +----------------+-------------------+    +----------------+-------------------+
-                   |                                         |
-                   v                                         v
-  +------------------------------------+    +------------------------------------+
-  | ROS 2 applications                |    | Native Unitree SDK clients        |
-  | unitree_ros2, bringup, tools      |    | validation tools, SDK clients     |
-  +------------------------------------+    +------------------------------------+
+        +--------------------------------+-------------------------------+
+        |                                |                               |
+        v                                v                               v
++------------------------------+ +------------------------------+ +------------------------------+
+| ROS 2 Sidecar Bridge         | | Unitree SDK2 Python Sidecar  | | Native C++ SDK Sidecar       |
+| (system Python)              | | (system Python)              | | (system C++)                 |
+|                              | |                              | |                              |
+| - LowState publisher         | | - LowState_ publisher        | | - LowState_ publisher        |
+| - LowCmd subscriber only     | | - LowCmd_ subscriber         | | - LowCmd_ subscriber         |
+|   when explicitly enabled    | |   after Phase 2              | |                              |
+| - rclpy + CycloneDDS         | | - unitree_sdk2py + DDS       | | - unitree_sdk2 + DDS         |
+| - UDP: 127.0.0.1:35501/35502 | | - UDP: 127.0.0.1:35521       | | - UDP: 127.0.0.1:35511/35512 |
++---------------+--------------+ +---------------+--------------+ +---------------+--------------+
+                |                                |                                |
+                v                                v                                v
++------------------------------+ +------------------------------+ +------------------------------+
+| ROS 2 / CycloneDDS           | | Unitree SDK DDS              | | Unitree SDK DDS              |
+|                              | |                              | |                              |
+| - /rt/lowstate               | | - rt/lowstate                | | - rt/lowstate                |
+| - /rt/lowcmd opt-in only     | | - rt/lowcmd after Phase 2    | | - rt/lowcmd                  |
++---------------+--------------+ +---------------+--------------+ +---------------+--------------+
+                |                                |                                |
+                v                                v                                v
++------------------------------+ +------------------------------+ +------------------------------+
+| ROS 2 applications           | | SDK2 Python policy clients   | | Native Unitree SDK clients   |
+| unitree_ros2, bringup, tools | | policy, validation tools     | | validation tools, SDK apps   |
++------------------------------+ +------------------------------+ +------------------------------+
+
+Only one Unitree SDK runtime column may be active at a time:
+
+- default: Unitree SDK2 Python sidecar active, native C++ SDK sidecar inactive
+- alternate: native C++ SDK sidecar active, Unitree SDK2 Python sidecar inactive
+- ROS 2 lowstate remains available in both modes
+- ROS 2 lowcmd is hidden and inactive unless explicitly enabled
 
 
                   Simulated MID360 LiDAR Path
@@ -92,8 +105,9 @@ The intended external flow is:
 - Isaac Sim 5.x installed and runnable through `isaac_sim_python`
 - ROS 2 Humble available on the host
 - `unitree_ros2` built locally, with the install prefix available
+- `unitree_sdk2py` installed or available at `~/unitree_sdk2_python`
 - CycloneDDS middleware available through ROS 2
-- `unitree_sdk2` built locally for the default native Unitree SDK bridge mode
+- `unitree_sdk2` built locally only when using the optional native C++ bridge
 
 Expected local `unitree_ros2` install prefix:
 

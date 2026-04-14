@@ -76,10 +76,10 @@ isaac_sim_python src/main.py --use-world
 | `--native-unitree-lowstate-topic` | `rt/lowstate` | Topic used by native C++ Unitree SDK lowstate publication. | `isaac_sim_python src/main.py --native-unitree-lowstate-topic rt/lowstate` |
 | `--native-unitree-lowcmd-topic` | `rt/lowcmd` | Topic used by native C++ Unitree SDK lowcmd subscription. | `isaac_sim_python src/main.py --native-unitree-lowcmd-topic rt/lowcmd` |
 | `--native-unitree-bridge-exe` | `native_sdk_bridge/build/unitree_g1_native_bridge` | Path to the compiled native C++ Unitree SDK sidecar executable. | `isaac_sim_python src/main.py --native-unitree-bridge-exe native_sdk_bridge/build/unitree_g1_native_bridge` |
-| `--enable-unitree-sdk2py-lowstate` / `--no-enable-unitree-sdk2py-lowstate` | `true` | Selects SDK2 Python lowstate as the default Unitree runtime lowstate path. Phase 1 will add the transport implementation. | `isaac_sim_python src/main.py --enable-unitree-sdk2py-lowstate` |
-| `--enable-unitree-sdk2py-lowcmd` / `--no-enable-unitree-sdk2py-lowcmd` | `true` | Selects SDK2 Python lowcmd as the default Unitree command authority. Phase 2 will add the transport implementation. Cannot be active with ROS 2 lowcmd or native C++ SDK lowcmd. | `isaac_sim_python src/main.py --no-enable-unitree-sdk2py-lowcmd --enable-ros2-lowcmd` |
+| `--enable-unitree-sdk2py-lowstate` / `--no-enable-unitree-sdk2py-lowstate` | `true` | Enables SDK2 Python lowstate publication as the default Unitree runtime lowstate path. | `isaac_sim_python src/main.py --enable-unitree-sdk2py-lowstate` |
+| `--enable-unitree-sdk2py-lowcmd` / `--no-enable-unitree-sdk2py-lowcmd` | `true` | Selects SDK2 Python lowcmd as the default Unitree command authority. Phase 2 will add the lowcmd transport implementation. Cannot be active with ROS 2 lowcmd or native C++ SDK lowcmd. | `isaac_sim_python src/main.py --no-enable-unitree-sdk2py-lowcmd --enable-ros2-lowcmd` |
 | `--unitree-sdk2py-domain-id` | `--dds-domain-id` | DDS domain id for the Unitree SDK2 Python runtime. | `isaac_sim_python src/main.py --unitree-sdk2py-domain-id 1` |
-| `--unitree-sdk2py-lowstate-topic` | `rt/lowstate` | Topic planned for SDK2 Python lowstate publication. | `isaac_sim_python src/main.py --unitree-sdk2py-lowstate-topic rt/lowstate` |
+| `--unitree-sdk2py-lowstate-topic` | `rt/lowstate` | Topic used for SDK2 Python lowstate publication. | `isaac_sim_python src/main.py --unitree-sdk2py-lowstate-topic rt/lowstate` |
 | `--unitree-sdk2py-lowcmd-topic` | `rt/lowcmd` | Topic planned for SDK2 Python lowcmd subscription. | `isaac_sim_python src/main.py --unitree-sdk2py-lowcmd-topic rt/lowcmd` |
 | `--unitree-sdk2py-network-interface` | `lo` | Network interface planned for SDK2 Python DDS initialization. | `isaac_sim_python src/main.py --unitree-sdk2py-network-interface lo` |
 | `--lowcmd-timeout-seconds` | `0.5` | Time a cached `rt/lowcmd` sample stays fresh. `0` disables timeout handling. | `isaac_sim_python src/main.py --lowcmd-timeout-seconds 0.5` |
@@ -110,8 +110,8 @@ isaac_sim_python src/main.py --use-world
 - The follow camera uses the robot base pose from the same kinematic snapshot
   path used by DDS state publication, so it still follows when DDS is disabled.
 - `--lowstate-publish-hz` must not exceed `1 / --physics-dt`.
-- Phase 0 of the SDK2 Python branch adds the config and authority model only.
-  The SDK2 Python lowstate and lowcmd transport work lands in later phases.
+- Phase 1 of the SDK2 Python branch adds SDK2 Python lowstate publication
+  through a Python sidecar. SDK2 Python lowcmd ingress lands in Phase 2.
 - ROS 2 lowstate remains enabled by default. ROS 2 lowcmd is explicit opt-in
   and cannot be active with any other lowcmd authority.
 - Native C++ Unitree SDK and SDK2 Python are mutually exclusive runtime modes.
