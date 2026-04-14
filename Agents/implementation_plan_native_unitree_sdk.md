@@ -768,12 +768,21 @@ Maps to milestones:
 
 ### Phase 3: Mixed-Mode Validation
 
+Status: implemented as repeatable tooling; run the smoke test on an Isaac Sim
+host to complete external validation.
+
 Scope:
 
 - add launch and smoke-test scripts for the mixed ROS 2 + native mode
 - validate ROS 2 lowstate, `/clock`, and `/livox/lidar`
 - validate native Unitree SDK lowstate visibility
 - validate native Unitree SDK lowcmd motion
+
+Implemented tooling:
+
+- `native_sdk_bridge/build/unitree_g1_native_lowstate_listener`
+- `native_sdk_bridge/build/unitree_g1_native_lowcmd_offset`
+- `scripts/run_parallel_ros2_native_smoke_test.sh`
 
 Primary outcome:
 

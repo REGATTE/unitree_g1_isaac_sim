@@ -1,3 +1,4 @@
+
 # unitree_g1_isaac_sim
 
 Isaac Sim environment for the Unitree G1 with a ROS 2 / CycloneDDS bridge
@@ -112,6 +113,14 @@ The default simulator config expects the bridge executable at:
 
 ```text
 native_sdk_bridge/build/unitree_g1_native_bridge
+```
+
+The same CMake build also produces native SDK validation tools used by the
+mixed-mode smoke test:
+
+```text
+native_sdk_bridge/build/unitree_g1_native_lowstate_listener
+native_sdk_bridge/build/unitree_g1_native_lowcmd_offset
 ```
 
 If your SDK checkout is not at `~/unitree_sdk2`, pass the root explicitly:
@@ -258,6 +267,50 @@ Current runtime expectation:
 
 - the configured target is `500 Hz`
 - the observed end-to-end ROS 2 rate has been about `467-470 Hz`
+
+## Mixed ROS 2 + Native SDK Smoke Test
+
+Phase 3 validation is automated by:
+
+```bash
+./scripts/run_parallel_ros2_native_smoke_test.sh
+```
+
+The script launches Isaac Sim in the target mixed mode:
+
+```bash
+isaac_sim_python src/main.py \
+  --headless \
+  --enable-dds \
+  --enable-ros2-lowstate \
+  --no-enable-ros2-lowcmd \
+  --enable-native-unitree-lowstate \
+  --enable-native-unitree-lowcmd \
+  --dds-domain-id 1 \
+  --native-unitree-domain-id 1
+```
+
+It then checks:
+
+- ROS 2 `/rt/lowstate` receives valid samples on `ROS_DOMAIN_ID=1`
+- native Unitree SDK `rt/lowstate` is visible and CRC-valid
+- native Unitree SDK `rt/lowcmd` publishes a conservative offset command
+- ROS 2 lowcmd stays disabled in the target command-authority mode
+
+Useful overrides:
+
+```bash
+DDS_DOMAIN_ID=1 \
+NATIVE_DOMAIN_ID=1 \
+NATIVE_LOWCMD_JOINT_INDEX=15 \
+NATIVE_LOWCMD_JOINT_NAME=left_shoulder_pitch_joint \
+NATIVE_LOWCMD_OFFSET_RAD=0.05 \
+./scripts/run_parallel_ros2_native_smoke_test.sh
+```
+
+Logs are written to `tmp/parallel_ros2_native_smoke_logs` by default. Keep the
+real robot on domain `0`; use domain `1` for simulator ROS 2 and native SDK
+validation unless you intentionally choose another isolated domain.
 - this is currently accepted for this branch as long as the realized rate
   remains above `450 Hz`
 

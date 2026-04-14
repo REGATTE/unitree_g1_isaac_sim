@@ -36,7 +36,20 @@ add_executable(unitree_g1_native_bridge
   src/lowstate_publisher.cpp
 )
 
-target_include_directories(unitree_g1_native_bridge
+add_executable(unitree_g1_native_lowstate_listener
+  src/lowstate_listener_tool.cpp
+)
+
+add_executable(unitree_g1_native_lowcmd_offset
+  src/lowcmd_offset_tool.cpp
+)
+
+foreach(target_name
+  unitree_g1_native_bridge
+  unitree_g1_native_lowstate_listener
+  unitree_g1_native_lowcmd_offset
+)
+target_include_directories(${target_name}
   PRIVATE
     include
     "${UNITREE_SDK2_INCLUDE_DIR}"
@@ -44,7 +57,7 @@ target_include_directories(unitree_g1_native_bridge
     "${UNITREE_SDK2_DDSCXX_INCLUDE_DIR}"
 )
 
-target_link_libraries(unitree_g1_native_bridge
+target_link_libraries(${target_name}
   PRIVATE
     "${UNITREE_SDK2_LIBRARY}"
     "${UNITREE_SDK2_DDSC_LIBRARY}"
@@ -52,12 +65,13 @@ target_link_libraries(unitree_g1_native_bridge
     Threads::Threads
 )
 
-target_link_options(unitree_g1_native_bridge
+target_link_options(${target_name}
   PRIVATE
     "-Wl,--disable-new-dtags"
 )
 
-set_target_properties(unitree_g1_native_bridge PROPERTIES
+set_target_properties(${target_name} PROPERTIES
   BUILD_RPATH "${UNITREE_SDK2_ROOT}/thirdparty/lib/${UNITREE_SDK2_ARCH}"
   INSTALL_RPATH "${UNITREE_SDK2_ROOT}/thirdparty/lib/${UNITREE_SDK2_ARCH}"
 )
+endforeach()
