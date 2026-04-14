@@ -36,17 +36,22 @@ class Ros2CycloneDdsSidecar(Node):
         bind_host: str,
         lowstate_port: int,
         lowcmd_port: int,
+        enable_lowcmd: bool,
     ) -> None:
         super().__init__("unitree_g1_ros2_sidecar", enable_rosout=False)
         self._lowstate_publisher = self.create_publisher(LowState, lowstate_topic, 10)
-        self.create_subscription(LowCmd, lowcmd_topic, self._on_lowcmd, 32)
+        self._lowcmd_subscription = (
+            self.create_subscription(LowCmd, lowcmd_topic, self._on_lowcmd, 32)
+            if enable_lowcmd
+            else None
+        )
 
         self._recv_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._recv_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._recv_socket.bind((bind_host, lowstate_port))
         self._recv_socket.setblocking(False)
 
-        self._send_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._send_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) if enable_lowcmd else None
         self._send_target = (bind_host, lowcmd_port)
 
     def poll_once(self) -> None:
@@ -59,7 +64,8 @@ class Ros2CycloneDdsSidecar(Node):
 
     def shutdown(self) -> None:
         self._recv_socket.close()
-        self._send_socket.close()
+        if self._send_socket is not None:
+            self._send_socket.close()
 
     def _publish_lowstate(self, packet: bytes) -> None:
         payload = decode_lowstate_packet(packet)
@@ -83,6 +89,8 @@ class Ros2CycloneDdsSidecar(Node):
         self._lowstate_publisher.publish(message)
 
     def _on_lowcmd(self, message: LowCmd) -> None:
+        if self._send_socket is None:
+            return
         count = min(BODY_JOINT_COUNT, len(message.motor_cmd))
         packet = encode_lowcmd_packet(
             mode_pr=message.mode_pr,
@@ -103,6 +111,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--bind-host", default="127.0.0.1")
     parser.add_argument("--lowstate-port", type=int, required=True)
     parser.add_argument("--lowcmd-port", type=int, required=True)
+    parser.add_argument(
+        "--enable-lowcmd",
+        action="store_true",
+        help="Create the ROS 2 lowcmd subscription and forward lowcmd packets to Isaac Sim.",
+    )
     return parser
 
 
@@ -115,6 +128,7 @@ def main(argv: list[str] | None = None) -> int:
         bind_host=args.bind_host,
         lowstate_port=args.lowstate_port,
         lowcmd_port=args.lowcmd_port,
+        enable_lowcmd=args.enable_lowcmd,
     )
     exit_code = 0
     try:

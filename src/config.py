@@ -73,6 +73,12 @@ class AppConfig:
     native_unitree_lowstate_topic: str
     native_unitree_lowcmd_topic: str
     native_unitree_bridge_exe: Path
+    enable_unitree_sdk2py_lowstate: bool
+    enable_unitree_sdk2py_lowcmd: bool
+    unitree_sdk2py_domain_id: int | None
+    unitree_sdk2py_lowstate_topic: str
+    unitree_sdk2py_lowcmd_topic: str
+    unitree_sdk2py_network_interface: str
     lowcmd_timeout_seconds: float
     lowstate_cadence_report_interval: int
     lowstate_cadence_warn_ratio: float
@@ -312,14 +318,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--enable-native-unitree-lowstate",
         action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Enable native Unitree SDK `rt/lowstate` publication. Enabled by default.",
+        default=False,
+        help="Enable native Unitree C++ SDK `rt/lowstate` publication. Disabled by default.",
     )
     parser.add_argument(
         "--enable-native-unitree-lowcmd",
         action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Enable native Unitree SDK `rt/lowcmd` ingress. Enabled by default.",
+        default=False,
+        help="Enable native Unitree C++ SDK `rt/lowcmd` ingress. Disabled by default.",
     )
     parser.add_argument(
         "--native-unitree-domain-id",
@@ -344,6 +350,42 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=Path,
         default=PROJECT_ROOT / "native_sdk_bridge" / "build" / "unitree_g1_native_bridge",
         help="Path to the compiled native Unitree SDK bridge sidecar executable.",
+    )
+    parser.add_argument(
+        "--enable-unitree-sdk2py-lowstate",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable Unitree SDK2 Python `rt/lowstate` publication. Enabled by default.",
+    )
+    parser.add_argument(
+        "--enable-unitree-sdk2py-lowcmd",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable Unitree SDK2 Python `rt/lowcmd` ingress. Enabled by default.",
+    )
+    parser.add_argument(
+        "--unitree-sdk2py-domain-id",
+        type=int,
+        default=None,
+        help="DDS domain id for the Unitree SDK2 Python runtime. Defaults to --dds-domain-id.",
+    )
+    parser.add_argument(
+        "--unitree-sdk2py-lowstate-topic",
+        type=str,
+        default="rt/lowstate",
+        help="Topic used for Unitree SDK2 Python lowstate publication.",
+    )
+    parser.add_argument(
+        "--unitree-sdk2py-lowcmd-topic",
+        type=str,
+        default="rt/lowcmd",
+        help="Topic used for Unitree SDK2 Python lowcmd subscription.",
+    )
+    parser.add_argument(
+        "--unitree-sdk2py-network-interface",
+        type=str,
+        default="lo",
+        help="Network interface passed to the Unitree SDK2 Python runtime.",
     )
     parser.add_argument(
         "--lowcmd-timeout-seconds",
@@ -516,10 +558,26 @@ def parse_config(argv: list[str] | None = None) -> AppConfig:
         )
     if args.lowcmd_max_position_delta_rad < 0.0 or not math.isfinite(args.lowcmd_max_position_delta_rad):
         parser.error("--lowcmd-max-position-delta-rad must be a finite non-negative float.")
-    if args.enable_ros2_lowcmd and args.enable_native_unitree_lowcmd:
+    active_lowcmd_sources = [
+        label
+        for label, enabled in (
+            ("ROS 2 sidecar", args.enable_ros2_lowcmd),
+            ("native Unitree C++ SDK", args.enable_native_unitree_lowcmd),
+            ("Unitree SDK2 Python", args.enable_unitree_sdk2py_lowcmd),
+        )
+        if enabled
+    ]
+    if len(active_lowcmd_sources) > 1:
         parser.error(
-            "multiple lowcmd sources enabled: ROS 2 sidecar and native Unitree SDK. "
-            "Enable only one lowcmd source at a time."
+            "multiple lowcmd sources enabled: "
+            f"{', '.join(active_lowcmd_sources)}. Enable only one lowcmd source at a time."
+        )
+    native_unitree_enabled = args.enable_native_unitree_lowstate or args.enable_native_unitree_lowcmd
+    sdk2py_enabled = args.enable_unitree_sdk2py_lowstate or args.enable_unitree_sdk2py_lowcmd
+    if native_unitree_enabled and sdk2py_enabled:
+        parser.error(
+            "multiple Unitree SDK runtimes enabled: native Unitree C++ SDK and Unitree SDK2 Python. "
+            "Enable only one Unitree SDK runtime at a time."
         )
     for label, value in (
         ("--livox-lidar-topic", args.livox_lidar_topic),
@@ -531,6 +589,9 @@ def parse_config(argv: list[str] | None = None) -> AppConfig:
         ("--lowcmd-topic", args.lowcmd_topic),
         ("--native-unitree-lowstate-topic", args.native_unitree_lowstate_topic),
         ("--native-unitree-lowcmd-topic", args.native_unitree_lowcmd_topic),
+        ("--unitree-sdk2py-lowstate-topic", args.unitree_sdk2py_lowstate_topic),
+        ("--unitree-sdk2py-lowcmd-topic", args.unitree_sdk2py_lowcmd_topic),
+        ("--unitree-sdk2py-network-interface", args.unitree_sdk2py_network_interface),
     ):
         if not value.strip():
             parser.error(f"{label} cannot be empty.")
@@ -565,10 +626,24 @@ def parse_config(argv: list[str] | None = None) -> AppConfig:
         lowcmd_max_position_delta_rad=args.lowcmd_max_position_delta_rad,
         enable_native_unitree_lowstate=args.enable_native_unitree_lowstate,
         enable_native_unitree_lowcmd=args.enable_native_unitree_lowcmd,
-        native_unitree_domain_id=args.native_unitree_domain_id or args.dds_domain_id,
+        native_unitree_domain_id=(
+            args.native_unitree_domain_id
+            if args.native_unitree_domain_id is not None
+            else args.dds_domain_id
+        ),
         native_unitree_lowstate_topic=args.native_unitree_lowstate_topic,
         native_unitree_lowcmd_topic=args.native_unitree_lowcmd_topic,
         native_unitree_bridge_exe=args.native_unitree_bridge_exe,
+        enable_unitree_sdk2py_lowstate=args.enable_unitree_sdk2py_lowstate,
+        enable_unitree_sdk2py_lowcmd=args.enable_unitree_sdk2py_lowcmd,
+        unitree_sdk2py_domain_id=(
+            args.unitree_sdk2py_domain_id
+            if args.unitree_sdk2py_domain_id is not None
+            else args.dds_domain_id
+        ),
+        unitree_sdk2py_lowstate_topic=args.unitree_sdk2py_lowstate_topic,
+        unitree_sdk2py_lowcmd_topic=args.unitree_sdk2py_lowcmd_topic,
+        unitree_sdk2py_network_interface=args.unitree_sdk2py_network_interface,
         lowcmd_timeout_seconds=args.lowcmd_timeout_seconds,
         lowstate_cadence_report_interval=args.lowstate_cadence_report_interval,
         lowstate_cadence_warn_ratio=args.lowstate_cadence_warn_ratio,

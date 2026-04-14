@@ -242,6 +242,7 @@ class DdsManager:
         }
         clean_env["RMW_IMPLEMENTATION"] = "rmw_cyclonedds_cpp"
         clean_env["ROS_DOMAIN_ID"] = str(self._config.dds_domain_id)
+        lowcmd_flag = " --enable-lowcmd" if self._config.enable_ros2_lowcmd else ""
         command = (
             f"source /opt/ros/humble/setup.bash >/dev/null 2>&1 && "
             f"source '{install_prefix / 'setup.bash'}' >/dev/null 2>&1 && "
@@ -251,6 +252,7 @@ class DdsManager:
             f"--bind-host '{self._config.bridge_bind_host}' "
             f"--lowstate-port {self._config.bridge_lowstate_port} "
             f"--lowcmd-port {self._lowcmd_subscriber.bound_port}"
+            f"{lowcmd_flag}"
         )
         self._bridge_process = subprocess.Popen(
             ["bash", "-lc", command],

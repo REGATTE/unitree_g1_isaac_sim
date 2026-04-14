@@ -13,15 +13,21 @@ from config import DEFAULT_WORLD_PATH, parse_config, resolve_unitree_ros2_instal
 
 
 class ConfigDefaultsTests(unittest.TestCase):
-    def test_phase0_defaults_enable_both_lowstate_paths_and_only_native_lowcmd(self):
+    def test_phase0_defaults_enable_ros2_lowstate_and_sdk2py_runtime(self):
         config = parse_config([])
 
         self.assertTrue(config.enable_dds)
         self.assertTrue(config.enable_ros2_lowstate)
         self.assertFalse(config.enable_ros2_lowcmd)
-        self.assertTrue(config.enable_native_unitree_lowstate)
-        self.assertTrue(config.enable_native_unitree_lowcmd)
+        self.assertFalse(config.enable_native_unitree_lowstate)
+        self.assertFalse(config.enable_native_unitree_lowcmd)
         self.assertEqual(config.native_unitree_domain_id, config.dds_domain_id)
+        self.assertTrue(config.enable_unitree_sdk2py_lowstate)
+        self.assertTrue(config.enable_unitree_sdk2py_lowcmd)
+        self.assertEqual(config.unitree_sdk2py_domain_id, config.dds_domain_id)
+        self.assertEqual(config.unitree_sdk2py_lowstate_topic, "rt/lowstate")
+        self.assertEqual(config.unitree_sdk2py_lowcmd_topic, "rt/lowcmd")
+        self.assertEqual(config.unitree_sdk2py_network_interface, "lo")
         self.assertEqual(config.dds_domain_id, 1)
         self.assertAlmostEqual(config.physics_dt, 1.0 / 500.0)
         self.assertFalse(config.use_world)
@@ -46,30 +52,101 @@ class ConfigDefaultsTests(unittest.TestCase):
             [
                 "--no-enable-dds",
                 "--no-enable-ros2-lowstate",
-                "--no-enable-native-unitree-lowstate",
-                "--no-enable-native-unitree-lowcmd",
+                "--no-enable-unitree-sdk2py-lowstate",
+                "--no-enable-unitree-sdk2py-lowcmd",
             ]
         )
 
         self.assertFalse(config.enable_dds)
         self.assertFalse(config.enable_ros2_lowstate)
-        self.assertFalse(config.enable_native_unitree_lowstate)
-        self.assertFalse(config.enable_native_unitree_lowcmd)
+        self.assertFalse(config.enable_unitree_sdk2py_lowstate)
+        self.assertFalse(config.enable_unitree_sdk2py_lowcmd)
 
-    def test_ros2_lowcmd_can_be_enabled_when_native_lowcmd_is_disabled(self):
+    def test_ros2_lowcmd_can_be_enabled_when_sdk2py_lowcmd_is_disabled(self):
         config = parse_config(
             [
                 "--enable-ros2-lowcmd",
-                "--no-enable-native-unitree-lowcmd",
+                "--no-enable-unitree-sdk2py-lowcmd",
             ]
         )
 
         self.assertTrue(config.enable_ros2_lowcmd)
-        self.assertFalse(config.enable_native_unitree_lowcmd)
+        self.assertFalse(config.enable_unitree_sdk2py_lowcmd)
 
-    def test_both_lowcmd_sources_enabled_fails_preflight(self):
+    def test_default_sdk2py_lowcmd_conflicts_with_ros2_lowcmd(self):
         with self.assertRaises(SystemExit):
             parse_config(["--enable-ros2-lowcmd"])
+
+    def test_native_runtime_can_be_enabled_when_sdk2py_runtime_is_disabled(self):
+        config = parse_config(
+            [
+                "--no-enable-unitree-sdk2py-lowstate",
+                "--no-enable-unitree-sdk2py-lowcmd",
+                "--enable-native-unitree-lowstate",
+                "--enable-native-unitree-lowcmd",
+            ]
+        )
+
+        self.assertFalse(config.enable_unitree_sdk2py_lowstate)
+        self.assertFalse(config.enable_unitree_sdk2py_lowcmd)
+        self.assertTrue(config.enable_native_unitree_lowstate)
+        self.assertTrue(config.enable_native_unitree_lowcmd)
+
+    def test_native_and_sdk2py_runtimes_enabled_fails_preflight(self):
+        with self.assertRaises(SystemExit):
+            parse_config(["--enable-native-unitree-lowstate"])
+
+    def test_native_and_sdk2py_lowcmd_sources_enabled_fails_preflight(self):
+        with self.assertRaises(SystemExit):
+            parse_config(["--enable-native-unitree-lowcmd"])
+
+    def test_ros2_native_and_sdk2py_lowcmd_sources_can_all_be_disabled(self):
+        config = parse_config(
+            [
+                "--no-enable-unitree-sdk2py-lowcmd",
+                "--no-enable-native-unitree-lowcmd",
+                "--no-enable-ros2-lowcmd",
+            ]
+        )
+
+        self.assertFalse(config.enable_ros2_lowcmd)
+        self.assertFalse(config.enable_native_unitree_lowcmd)
+        self.assertFalse(config.enable_unitree_sdk2py_lowcmd)
+
+    def test_sdk2py_runtime_values_can_be_overridden(self):
+        config = parse_config(
+            [
+                "--unitree-sdk2py-domain-id",
+                "7",
+                "--unitree-sdk2py-lowstate-topic",
+                "rt/custom_lowstate",
+                "--unitree-sdk2py-lowcmd-topic",
+                "rt/custom_lowcmd",
+                "--unitree-sdk2py-network-interface",
+                "eth0",
+            ]
+        )
+
+        self.assertEqual(config.unitree_sdk2py_domain_id, 7)
+        self.assertEqual(config.unitree_sdk2py_lowstate_topic, "rt/custom_lowstate")
+        self.assertEqual(config.unitree_sdk2py_lowcmd_topic, "rt/custom_lowcmd")
+        self.assertEqual(config.unitree_sdk2py_network_interface, "eth0")
+
+    def test_explicit_zero_domain_ids_are_preserved(self):
+        config = parse_config(
+            [
+                "--dds-domain-id",
+                "3",
+                "--unitree-sdk2py-domain-id",
+                "0",
+                "--native-unitree-domain-id",
+                "0",
+            ]
+        )
+
+        self.assertEqual(config.dds_domain_id, 3)
+        self.assertEqual(config.unitree_sdk2py_domain_id, 0)
+        self.assertEqual(config.native_unitree_domain_id, 0)
 
     def test_livox_lidar_can_be_disabled_and_overridden(self):
         config = parse_config(

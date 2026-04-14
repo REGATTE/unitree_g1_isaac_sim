@@ -81,6 +81,12 @@ def _build_config(**overrides) -> AppConfig:
         native_unitree_lowstate_topic="rt/lowstate",
         native_unitree_lowcmd_topic="rt/lowcmd",
         native_unitree_bridge_exe=Path("/tmp/unitree_g1_native_bridge"),
+        enable_unitree_sdk2py_lowstate=False,
+        enable_unitree_sdk2py_lowcmd=False,
+        unitree_sdk2py_domain_id=1,
+        unitree_sdk2py_lowstate_topic="rt/lowstate",
+        unitree_sdk2py_lowcmd_topic="rt/lowcmd",
+        unitree_sdk2py_network_interface="lo",
         lowcmd_timeout_seconds=0.5,
         lowstate_cadence_report_interval=3,
         lowstate_cadence_warn_ratio=0.05,
@@ -271,6 +277,39 @@ class DdsManagerTests(unittest.TestCase):
             stale = manager._find_stale_sidecar_pids(sidecar_script)
 
         self.assertEqual(stale, [33333])
+
+    def test_sidecar_launch_omits_lowcmd_subscription_when_ros2_lowcmd_disabled(self):
+        manager = DdsManager(
+            _build_config(
+                enable_ros2_lowcmd=False,
+                unitree_ros2_install_prefix=Path("/tmp/unitree_ros2_install"),
+            )
+        )
+
+        with patch.object(manager, "_cleanup_stale_sidecars"):
+            with patch("dds.ros2.manager.subprocess.Popen") as popen_mock:
+                popen_mock.return_value.pid = 12345
+                manager._start_sidecar_bridge()
+
+        command = popen_mock.call_args.args[0][2]
+        self.assertNotIn("--enable-lowcmd", command)
+        self.assertIn("--lowcmd-port 35502", command)
+
+    def test_sidecar_launch_enables_lowcmd_subscription_when_ros2_lowcmd_enabled(self):
+        manager = DdsManager(
+            _build_config(
+                enable_ros2_lowcmd=True,
+                unitree_ros2_install_prefix=Path("/tmp/unitree_ros2_install"),
+            )
+        )
+
+        with patch.object(manager, "_cleanup_stale_sidecars"):
+            with patch("dds.ros2.manager.subprocess.Popen") as popen_mock:
+                popen_mock.return_value.pid = 12345
+                manager._start_sidecar_bridge()
+
+        command = popen_mock.call_args.args[0][2]
+        self.assertIn("--enable-lowcmd", command)
 
 
 if __name__ == "__main__":
