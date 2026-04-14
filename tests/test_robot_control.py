@@ -9,7 +9,7 @@ SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from dds.g1_lowcmd import LowCmdCache
+from dds.common.lowcmd_types import LowCmdCache
 from robot_control import RobotCommandApplier
 from robot_state import JointStateSnapshot
 

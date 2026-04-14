@@ -6,7 +6,13 @@ is extracted, how low-level command and state traffic crosses the ROS 2 /
 CycloneDDS boundary, how the DDS bridge is structured, and how the simulated
 Livox MID360 path fits into the overall runtime.
 
-The shorter user-facing launch notes remain in `README.md`. This file is meant
+Current branch note: the default command-authority mode has changed since this
+document was first written. ROS 2 lowstate remains enabled by default, but ROS 2
+lowcmd command application is disabled by default and native Unitree SDK
+`rt/lowcmd` is the active command source. The native bridge is documented in
+`context_native_bridge.md`.
+
+The shorter user-facing launch notes remain in `../README.md`. This file is meant
 to be the architecture reference you read when changing or debugging the
 system.
 

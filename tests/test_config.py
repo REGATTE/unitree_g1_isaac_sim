@@ -13,11 +13,15 @@ from config import DEFAULT_WORLD_PATH, parse_config, resolve_unitree_ros2_instal
 
 
 class ConfigDefaultsTests(unittest.TestCase):
-    def test_dds_and_lowcmd_are_enabled_by_default(self):
+    def test_phase0_defaults_enable_both_lowstate_paths_and_only_native_lowcmd(self):
         config = parse_config([])
 
         self.assertTrue(config.enable_dds)
-        self.assertTrue(config.enable_lowcmd_subscriber)
+        self.assertTrue(config.enable_ros2_lowstate)
+        self.assertFalse(config.enable_ros2_lowcmd)
+        self.assertTrue(config.enable_native_unitree_lowstate)
+        self.assertTrue(config.enable_native_unitree_lowcmd)
+        self.assertEqual(config.native_unitree_domain_id, config.dds_domain_id)
         self.assertEqual(config.dds_domain_id, 1)
         self.assertAlmostEqual(config.physics_dt, 1.0 / 500.0)
         self.assertFalse(config.use_world)
@@ -37,11 +41,35 @@ class ConfigDefaultsTests(unittest.TestCase):
         self.assertEqual(config.livox_lidar_frame_id, "mid360_link")
         self.assertEqual(config.livox_lidar_parent_link_name, "torso_link")
 
-    def test_boolean_optional_flags_can_disable_default_dds_path(self):
-        config = parse_config(["--no-enable-dds", "--no-enable-lowcmd-subscriber"])
+    def test_boolean_optional_flags_can_disable_default_dds_paths(self):
+        config = parse_config(
+            [
+                "--no-enable-dds",
+                "--no-enable-ros2-lowstate",
+                "--no-enable-native-unitree-lowstate",
+                "--no-enable-native-unitree-lowcmd",
+            ]
+        )
 
         self.assertFalse(config.enable_dds)
-        self.assertFalse(config.enable_lowcmd_subscriber)
+        self.assertFalse(config.enable_ros2_lowstate)
+        self.assertFalse(config.enable_native_unitree_lowstate)
+        self.assertFalse(config.enable_native_unitree_lowcmd)
+
+    def test_ros2_lowcmd_can_be_enabled_when_native_lowcmd_is_disabled(self):
+        config = parse_config(
+            [
+                "--enable-ros2-lowcmd",
+                "--no-enable-native-unitree-lowcmd",
+            ]
+        )
+
+        self.assertTrue(config.enable_ros2_lowcmd)
+        self.assertFalse(config.enable_native_unitree_lowcmd)
+
+    def test_both_lowcmd_sources_enabled_fails_preflight(self):
+        with self.assertRaises(SystemExit):
+            parse_config(["--enable-ros2-lowcmd"])
 
     def test_livox_lidar_can_be_disabled_and_overridden(self):
         config = parse_config(

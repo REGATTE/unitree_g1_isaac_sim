@@ -18,7 +18,7 @@ import rclpy
 from rclpy.node import Node
 from unitree_hg.msg import LowCmd, LowState
 
-from dds.bridge_protocol import decode_lowstate_packet, encode_lowcmd_packet
+from dds.ros2.bridge_protocol import decode_lowstate_packet, encode_lowcmd_packet
 
 
 BODY_JOINT_COUNT = 29
