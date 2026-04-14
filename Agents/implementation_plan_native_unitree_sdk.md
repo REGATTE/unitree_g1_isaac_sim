@@ -124,11 +124,13 @@ sidecar-era code rather than reverting the branch.
 
 ## Interface Decision
 
-Add explicit configuration for native Unitree C++ SDK support. Suggested CLI
-flags:
+Add explicit configuration for both ROS 2 and native Unitree SDK lowstate and
+lowcmd surfaces so state publication and command ingress can be controlled
+independently. Suggested CLI flags:
 
 ```bash
---enable-native-unitree-dds
+--enable-ros2-lowstate
+--enable-ros2-lowcmd
 --enable-native-unitree-lowstate
 --enable-native-unitree-lowcmd
 --native-unitree-domain-id 1
@@ -139,9 +141,10 @@ flags:
 
 Recommended defaults:
 
-- `--enable-native-unitree-dds`: disabled
-- `--enable-native-unitree-lowstate`: enabled only when native bridge is enabled
-- `--enable-native-unitree-lowcmd`: disabled unless explicitly requested
+- `--enable-ros2-lowstate`: enabled
+- `--enable-ros2-lowcmd`: disabled
+- `--enable-native-unitree-lowstate`: enabled
+- `--enable-native-unitree-lowcmd`: enabled
 - `--native-unitree-domain-id`: default to `--dds-domain-id`
 - `--native-unitree-lowstate-topic`: `rt/lowstate`
 - `--native-unitree-lowcmd-topic`: `rt/lowcmd`
@@ -154,16 +157,16 @@ Target launch mode for the user's requested architecture:
 isaac_sim_python src/main.py \
   --headless \
   --enable-dds \
-  --enable-native-unitree-dds \
+  --enable-ros2-lowstate \
+  --no-enable-ros2-lowcmd \
   --enable-native-unitree-lowstate \
-  --enable-native-unitree-lowcmd \
-  --no-enable-lowcmd-subscriber
+  --enable-native-unitree-lowcmd
 ```
 
 Meaning:
 
 - keep ROS 2 lowstate, `/clock`, and `/livox/lidar`
-- disable ROS 2 lowcmd ingestion
+- keep ROS 2 lowcmd disabled by default, but available for explicit testing
 - publish native Unitree SDK lowstate
 - accept native Unitree SDK lowcmd as the only low-level command source
 
@@ -238,41 +241,41 @@ flowchart TD
 
 ## Command Authority Policy
 
-The simulator must avoid ambiguous low-level control. Add an explicit runtime
-policy before enabling native lowcmd.
+The simulator must avoid ambiguous low-level control. Lowstate publication may
+run in parallel across both external interfaces, but low-level command
+authority must remain unambiguous.
 
 Target policy:
 
-- if native Unitree SDK lowcmd is enabled, ROS 2 lowcmd should be disabled for the
-  intended launch mode
-- if both are enabled intentionally for testing, the simulator must choose a
-  deterministic policy and log it loudly
+- ROS 2 lowstate and native Unitree SDK lowstate may both be enabled at the
+  same time
+- ROS 2 lowcmd and native Unitree SDK lowcmd must not both be active at the
+  same time
+- default command authority should be native Unitree SDK lowcmd
+- ROS 2 lowcmd remains available behind an explicit flag for later testing
 
-Recommended first implementation:
+Preflight guard:
 
-- refuse startup if both ROS 2 lowcmd and native Unitree SDK lowcmd are enabled
-  without an explicit override
-
-Suggested config:
-
-```bash
---allow-multiple-lowcmd-sources
-```
-
-Default:
-
-- false
-
-If false and both are active:
+- add a startup validation check that runs before bridge initialization
+- if both `--enable-ros2-lowcmd` and `--enable-native-unitree-lowcmd` are
+  true, fail startup with a clear configuration error
 
 ```text
 startup error:
   "multiple lowcmd sources enabled: ROS 2 sidecar and native Unitree SDK.
-   Disable one source or pass --allow-multiple-lowcmd-sources."
+   Enable only one lowcmd source at a time."
 ```
 
-If the override is later needed, use "latest fresh command wins" and include a
-source label in the cached command result.
+Normalization rule:
+
+- if one lowcmd flag is enabled for a given launch mode, the other lowcmd
+  source should be treated as off for that mode
+- this keeps the command path single-authority by construction
+- do not auto-merge or arbitrate between lowcmd sources in the first
+  implementation
+
+This should be implemented as a preflight check in config validation or early
+startup, before any DDS sidecar or native bridge subprocess is started.
 
 ## Shared Internal Lowcmd Shape
 
@@ -496,9 +499,10 @@ command_applier.apply_lowcmd(active_lowcmd)
 
 In the target user mode:
 
-- `dds_manager.latest_lowcmd` is always `None` because
-  `--no-enable-lowcmd-subscriber` is set
-- `native_dds_manager.latest_lowcmd` is the active command source
+- `native_dds_manager.latest_lowcmd` is the active command source because
+  `--enable-native-unitree-lowcmd` is on
+- `dds_manager.latest_lowcmd` is inactive because `--enable-ros2-lowcmd` is
+  off
 
 State publication:
 
@@ -534,25 +538,24 @@ settings.
 Suggested fields:
 
 ```python
-enable_native_unitree_dds: bool
+enable_ros2_lowstate: bool
+enable_ros2_lowcmd: bool
 enable_native_unitree_lowstate: bool
 enable_native_unitree_lowcmd: bool
 native_unitree_domain_id: int | None
 native_unitree_lowstate_topic: str
 native_unitree_lowcmd_topic: str
 native_unitree_bridge_exe: Path
-allow_multiple_lowcmd_sources: bool
 ```
 
 Validation:
 
-- if native bridge is enabled and the compiled C++ sidecar binary or Unitree
-  SDK runtime is unavailable, warn and continue without native external I/O, or
-  fail if a strict flag is added
-- if both ROS 2 and native lowcmd sources are enabled and
-  `allow_multiple_lowcmd_sources` is false, fail during config validation or
-  startup
 - if `native_unitree_domain_id` is omitted, use `dds_domain_id`
+- if both lowcmd sources are enabled, fail during config validation or startup
+  preflight
+- lowstate may remain enabled for both transports simultaneously
+- native bridge availability should still be checked at startup so the repo
+  remains usable without native SDK support when native mode is not required
 
 Optional strict flag:
 
@@ -586,7 +589,10 @@ Add tests for:
    - stale lowcmd handling matches existing behavior
    - reset clears cached command and cadence state
 5. Config validation
-   - both lowcmd sources enabled without override fails
+   - both lowstate publishers enabled is allowed
+   - native lowcmd enabled with ROS 2 lowcmd disabled is allowed
+   - ROS 2 lowcmd enabled with native lowcmd disabled is allowed
+   - both lowcmd sources enabled fails preflight validation
    - native domain default resolves from `dds_domain_id`
 
 Expected test files:
@@ -612,10 +618,10 @@ Run simulator in target split mode:
 isaac_sim_python src/main.py \
   --headless \
   --enable-dds \
-  --enable-native-unitree-dds \
+  --enable-ros2-lowstate \
+  --no-enable-ros2-lowcmd \
   --enable-native-unitree-lowstate \
-  --enable-native-unitree-lowcmd \
-  --no-enable-lowcmd-subscriber
+  --enable-native-unitree-lowcmd
 ```
 
 Validate ROS 2 state/sensors:
@@ -697,6 +703,99 @@ Document:
 - validation examples
 - known limitations
 
+## Phases
+
+### Phase 0: Interface And Safety Baseline
+
+Scope:
+
+- define explicit ROS 2/native lowstate and lowcmd flags
+- set defaults so both lowstate paths are enabled
+- set defaults so native lowcmd is enabled and ROS 2 lowcmd is disabled
+- add the single-authority lowcmd preflight guard
+- move shared lowcmd dataclasses into a transport-agnostic location
+
+Primary outcome:
+
+- the runtime configuration cleanly represents the intended mixed mode before
+  any native bridge transport work begins
+
+Maps to milestones:
+
+- Milestone 1
+
+### Phase 1: Native Lowstate Publication
+
+Scope:
+
+- implement the Isaac-side native lowstate UDP publisher
+- implement the C++ sidecar native lowstate DDS publisher
+- add native manager publish-only mode
+- integrate native lowstate publication into the main loop
+- validate simultaneous ROS 2 and native lowstate publication
+
+Primary outcome:
+
+- the simulator publishes lowstate on both ROS 2 and native Unitree SDK
+  surfaces in parallel
+
+Maps to milestones:
+
+- Milestone 2
+
+### Phase 2: Native Lowcmd Ingress
+
+Scope:
+
+- implement the C++ sidecar native lowcmd DDS subscriber
+- implement the Isaac-side native lowcmd UDP receiver
+- integrate native lowcmd caching and freshness handling
+- make native lowcmd the active command source in the target mode
+- keep ROS 2 lowcmd available only as an explicit alternative test mode
+
+Primary outcome:
+
+- the simulator accepts native Unitree SDK `rt/lowcmd` as the active low-level
+  command source with unambiguous authority
+
+Maps to milestones:
+
+- Milestone 3
+
+### Phase 3: Mixed-Mode Validation
+
+Scope:
+
+- add launch and smoke-test scripts for the mixed ROS 2 + native mode
+- validate ROS 2 lowstate, `/clock`, and `/livox/lidar`
+- validate native Unitree SDK lowstate visibility
+- validate native Unitree SDK lowcmd motion
+
+Primary outcome:
+
+- one repeatable validation path proves the simulator-side mixed interface
+
+Maps to milestones:
+
+- Milestone 4
+
+### Phase 4: Documentation And Cleanup
+
+Scope:
+
+- update README, context, and config documentation
+- document lowcmd authority rules and launch modes
+- capture known limitations and validation steps
+
+Primary outcome:
+
+- users can understand and launch the supported ROS 2-only, native-lowcmd, and
+  mixed-interface modes without reverse-engineering the code
+
+Maps to milestones:
+
+- Milestone 5
+
 ## Milestones
 
 ### Milestone 1: Config And Shared Types
@@ -704,7 +803,8 @@ Document:
 Deliverables:
 
 - native bridge config flags
-- command-source validation
+- explicit ROS 2/native lowstate and lowcmd flags
+- single-authority lowcmd preflight validation
 - shared `LowCmdCache` / `SimOrderLowCmd` location
 - unit tests for config and shared type behavior
 
@@ -737,7 +837,7 @@ Deliverables:
 - native C++ sidecar lowcmd subscriber
 - native lowcmd cache freshness
 - native lowcmd integration with `RobotCommandApplier`
-- command-authority startup guard
+- startup preflight guard that rejects simultaneous ROS 2 and native lowcmd
 - tests for CRC, width handling, stale timeout, and articulation application
 
 Exit criteria:
@@ -810,16 +910,12 @@ Exit criteria:
 
 ## Recommended Implementation Order
 
-1. Add config flags and command-source validation.
-2. Move shared lowcmd dataclasses out of the ROS 2 UDP subscriber module.
-3. Implement native lowstate publisher and tests.
-4. Add native manager publish-only mode.
-5. Integrate native manager into `main.py` for state publication.
-6. Validate parallel ROS 2 + native Unitree SDK lowstate publication.
-7. Implement native lowcmd subscriber and tests.
-8. Integrate native lowcmd as the selected command source.
-9. Add target split-mode smoke test.
-10. Update docs.
+1. Phase 0: add config flags, lowcmd authority validation, and shared lowcmd types.
+2. Phase 1: implement native lowstate publication and publish-only native manager integration.
+3. Phase 1: validate parallel ROS 2 + native Unitree SDK lowstate publication.
+4. Phase 2: implement native lowcmd subscription, freshness handling, and command-source integration.
+5. Phase 3: add mixed-mode smoke tests and validation scripts.
+6. Phase 4: update docs and usage guidance.
 
 This order gives useful value early: native SDK clients can read simulator
 state before command authority is introduced.
