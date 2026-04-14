@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
 import sys
-import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -51,24 +51,16 @@ class LowStateSeed:
 
 class LowStateSeedListener:
     def __init__(self) -> None:
-        from unitree_sdk2py.utils.crc import CRC
-
-        self._crc = CRC()
         self._seed: LowStateSeed | None = None
-        self._event = threading.Event()
 
     def on_message(self, msg) -> None:
-        if self._crc.Crc(msg) != msg.crc:
-            return
         motor_state = msg.motor_state
         self._seed = LowStateSeed(
             positions=[float(motor_state[index].q) for index in range(len(motor_state))],
         )
-        self._event.set()
 
-    def wait_for_seed(self, timeout_seconds: float) -> LowStateSeed | None:
-        if not self._event.wait(timeout_seconds):
-            return None
+    @property
+    def seed(self) -> LowStateSeed | None:
         return self._seed
 
 
@@ -139,12 +131,11 @@ def main() -> int:
     args = build_parser().parse_args()
 
     try:
-        from unitree_sdk2py.core.channel import ChannelFactoryInitialize, ChannelPublisher, ChannelSubscriber
-        from unitree_sdk2py.idl.default import unitree_hg_msg_dds__LowCmd_
-        from unitree_sdk2py.idl.unitree_hg.msg.dds_ import LowCmd_, LowState_
-        from unitree_sdk2py.utils.crc import CRC
+        import rclpy
+        from rclpy.node import Node
+        from unitree_hg.msg import LowCmd, LowState
     except ImportError as exc:
-        print(f"Failed to import unitree_sdk2py: {exc}", file=sys.stderr)
+        print(f"Failed to import ROS 2 lowcmd dependencies: {exc}", file=sys.stderr)
         return 1
 
     try:
@@ -153,57 +144,63 @@ def main() -> int:
         print(str(exc), file=sys.stderr)
         return 1
 
-    ChannelFactoryInitialize(args.dds_domain_id)
-
     seed_listener = LowStateSeedListener()
-    lowstate_subscriber = ChannelSubscriber(args.lowstate_topic, LowState_)
-    lowstate_subscriber.Init(seed_listener.on_message, 32)
+    os.environ["ROS_DOMAIN_ID"] = str(args.dds_domain_id)
+    rclpy.init(args=None)
+    node = Node("unitree_g1_lowcmd_sender", enable_rosout=False)
+    node.create_subscription(LowState, args.lowstate_topic, seed_listener.on_message, 32)
+    publisher = node.create_publisher(LowCmd, args.lowcmd_topic, 32)
 
-    seed = seed_listener.wait_for_seed(timeout_seconds=max(args.seed_timeout, 0.0))
-    if seed is None:
-        print(
-            f"Did not receive a valid `{args.lowstate_topic}` sample within {args.seed_timeout:.1f}s. "
-            "Start Isaac Sim with DDS enabled first.",
-            file=sys.stderr,
-        )
-        return 1
+    deadline = time.monotonic() + max(args.seed_timeout, 0.0)
+    try:
+        while seed_listener.seed is None and time.monotonic() < deadline and rclpy.ok():
+            rclpy.spin_once(node, timeout_sec=0.05)
 
-    if len(seed.positions) < BODY_JOINT_COUNT:
-        print(
-            f"Received only {len(seed.positions)} motor positions, expected at least {BODY_JOINT_COUNT}.",
-            file=sys.stderr,
-        )
-        return 1
+        seed = seed_listener.seed
+        if seed is None:
+            print(
+                f"Did not receive a valid `{args.lowstate_topic}` sample within {args.seed_timeout:.1f}s. "
+                "Start Isaac Sim with DDS enabled first.",
+                file=sys.stderr,
+            )
+            return 1
 
-    target_positions = list(seed.positions[:BODY_JOINT_COUNT])
-    target_positions[target_index] += args.offset_rad
-    target_kp = float(args.default_kp if args.target_kp is None else args.target_kp)
-    target_kd = float(args.default_kd if args.target_kd is None else args.target_kd)
+        if len(seed.positions) < BODY_JOINT_COUNT:
+            print(
+                f"Received only {len(seed.positions)} motor positions, expected at least {BODY_JOINT_COUNT}.",
+                file=sys.stderr,
+            )
+            return 1
 
-    publisher = ChannelPublisher(args.lowcmd_topic, LowCmd_)
-    publisher.Init()
-    crc = CRC()
-    # `--rate-hz` and `--duration` are validated at parse time, so the publish
-    # loop can use the configured values directly here.
-    period_seconds = 1.0 / args.rate_hz
-    end_time = time.time() + args.duration
-    publish_count = 0
+        target_positions = list(seed.positions[:BODY_JOINT_COUNT])
+        target_positions[target_index] += args.offset_rad
+        target_kp = float(args.default_kp if args.target_kp is None else args.target_kp)
+        target_kd = float(args.default_kd if args.target_kd is None else args.target_kd)
 
-    while time.time() < end_time:
-        msg = unitree_hg_msg_dds__LowCmd_()
-        msg.mode_pr = 0
-        msg.mode_machine = 0
-        for index in range(BODY_JOINT_COUNT):
-            motor = msg.motor_cmd[index]
-            motor.q = float(target_positions[index])
-            motor.dq = 0.0
-            motor.tau = 0.0
-            motor.kp = target_kp if index == target_index else float(args.default_kp)
-            motor.kd = target_kd if index == target_index else float(args.default_kd)
-        msg.crc = crc.Crc(msg)
-        publisher.Write(msg)
-        publish_count += 1
-        time.sleep(period_seconds)
+        period_seconds = 1.0 / args.rate_hz
+        end_time = time.monotonic() + args.duration
+        publish_count = 0
+
+        while time.monotonic() < end_time and rclpy.ok():
+            msg = LowCmd()
+            msg.mode_pr = 0
+            msg.mode_machine = 0
+            for index in range(min(BODY_JOINT_COUNT, len(msg.motor_cmd))):
+                motor = msg.motor_cmd[index]
+                motor.q = float(target_positions[index])
+                motor.dq = 0.0
+                motor.tau = 0.0
+                motor.kp = target_kp if index == target_index else float(args.default_kp)
+                motor.kd = target_kd if index == target_index else float(args.default_kd)
+            msg.crc = 0
+            publisher.publish(msg)
+            publish_count += 1
+            rclpy.spin_once(node, timeout_sec=0.0)
+            time.sleep(period_seconds)
+    finally:
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
     print(
         f"Published {publish_count} lowcmd samples on {args.lowcmd_topic} "

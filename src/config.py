@@ -5,11 +5,13 @@ from __future__ import annotations
 import argparse
 import math
 from dataclasses import dataclass
+import os
 from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MODELS_ROOT = PROJECT_ROOT / "Models" / "USD"
+DEFAULT_WORLD_PATH = PROJECT_ROOT / "Models" / "world" / "Hospital_World.usd"
 DEFAULT_VARIANT = "29dof"
 DEFAULT_ASSET_BY_VARIANT = {
     "23dof": MODELS_ROOT / "23dof" / "usd" / "g1_23dof_rev_1_0" / "g1_23dof_rev_1_0.usd",
@@ -23,6 +25,24 @@ def positive_finite_float(value: str) -> float:
     if not math.isfinite(parsed) or parsed <= 0.0:
         raise argparse.ArgumentTypeError(f"expected a positive finite float, got {value!r}")
     return parsed
+
+
+def non_negative_finite_float(value: str) -> float:
+    """Parse a CLI float argument that must be finite and non-negative."""
+    parsed = float(value)
+    if not math.isfinite(parsed) or parsed < 0.0:
+        raise argparse.ArgumentTypeError(f"expected a non-negative finite float, got {value!r}")
+    return parsed
+
+
+def parse_bool(value: str) -> bool:
+    """Parse a CLI bool argument from common true/false spellings."""
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "t", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "f", "no", "n", "off"}:
+        return False
+    raise argparse.ArgumentTypeError(f"expected true or false, got {value!r}")
 
 
 @dataclass(frozen=True)
@@ -44,10 +64,32 @@ class AppConfig:
     lowstate_topic: str
     lowcmd_topic: str
     lowstate_publish_hz: float
+    lowcmd_max_position_delta_rad: float
     enable_lowcmd_subscriber: bool
     lowcmd_timeout_seconds: float
     lowstate_cadence_report_interval: int
     lowstate_cadence_warn_ratio: float
+    unitree_ros2_install_prefix: Path | None
+    ros2_python_exe: str
+    bridge_bind_host: str
+    bridge_lowstate_port: int
+    bridge_lowcmd_port: int
+    enable_livox_lidar: bool = True
+    livox_lidar_topic: str = "livox/lidar"
+    livox_lidar_frame_id: str = "mid360_link"
+    livox_lidar_parent_link_name: str = "torso_link"
+    livox_lidar_prim_name: str = "mid360_link"
+    livox_lidar_sensor_prim_name: str = "mid360_rtx_lidar"
+    livox_lidar_rtx_config: str = "OS1"
+    livox_lidar_rtx_variant: str = "OS1_REV6_32ch20hz1024res"
+    use_world: bool = False
+    world_path: Path = DEFAULT_WORLD_PATH
+    world_prim_path: str = "/World/Environment"
+    enable_follow_camera: bool = True
+    follow_camera_prim_path: str = "/World/FollowCamera"
+    follow_camera_distance: float = 4.0
+    follow_camera_height: float = 0.6
+    follow_camera_target_height: float = 0.3
 
     def resolve_asset_path(self) -> Path:
         asset_path = self.asset_path or DEFAULT_ASSET_BY_VARIANT[self.robot_variant]
@@ -55,6 +97,14 @@ class AppConfig:
         if not asset_path.exists():
             raise FileNotFoundError(f"Robot USD asset does not exist: {asset_path}")
         return asset_path
+
+    def resolve_world_path(self) -> Path | None:
+        if not self.use_world:
+            return None
+        world_path = self.world_path.expanduser().resolve()
+        if not world_path.exists():
+            raise FileNotFoundError(f"World USD asset does not exist: {world_path}")
+        return world_path
 
     @property
     def simulation_app_config(self) -> dict[str, object]:
@@ -93,9 +143,65 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Spawn height for the robot root prim in meters.",
     )
     parser.add_argument(
+        "--use-world",
+        type=parse_bool,
+        nargs="?",
+        const=True,
+        default=False,
+        help=(
+            "Reference the configured world USD into the stage. Accepts true/false; "
+            "passing --use-world without a value is treated as true."
+        ),
+    )
+    parser.add_argument(
+        "--world-path",
+        type=Path,
+        default=DEFAULT_WORLD_PATH,
+        help="World USD path used when --use-world true is set.",
+    )
+    parser.add_argument(
+        "--world-prim-path",
+        type=str,
+        default="/World/Environment",
+        help="Prim path where the optional world USD will be referenced.",
+    )
+    parser.add_argument(
+        "--enable-follow-camera",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Keep the active viewport camera following the robot base. "
+            "Enabled by default."
+        ),
+    )
+    parser.add_argument(
+        "--follow-camera-prim-path",
+        type=str,
+        default="/World/FollowCamera",
+        help="Prim path for the camera that follows the robot.",
+    )
+    parser.add_argument(
+        "--follow-camera-distance",
+        type=positive_finite_float,
+        default=4.0,
+        help="Distance in meters behind the robot for the follow camera.",
+    )
+    parser.add_argument(
+        "--follow-camera-height",
+        type=positive_finite_float,
+        default=0.6,
+        help="Height offset in meters above the robot base for the follow camera.",
+    )
+    parser.add_argument(
+        "--follow-camera-target-height",
+        type=non_negative_finite_float,
+        default=0.3,
+        help="Height offset in meters above the robot base that the follow camera looks at.",
+    )
+    parser.add_argument(
         "--physics-dt",
         type=positive_finite_float,
-        default=1.0 / 120.0,
+        default=1.0 / 500.0,
         help="Physics timestep in seconds.",
     )
     parser.add_argument(
@@ -143,10 +249,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--enable-dds",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help=(
             "Enable the Cyclone DDS bridge so external Unitree SDK or ROS 2 "
-            "clients can treat the simulator like a real robot."
+            "clients can treat the simulator like a real robot. Enabled by default."
         ),
     )
     parser.add_argument(
@@ -170,15 +277,26 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--lowstate-publish-hz",
         type=positive_finite_float,
-        default=100.0,
+        default=500.0,
         help="Target DDS publish rate in Hz for `rt/lowstate`.",
     )
     parser.add_argument(
+        "--lowcmd-max-position-delta-rad",
+        type=float,
+        default=0.25,
+        help=(
+            "Maximum allowed absolute joint-position delta, in radians, between "
+            "the current simulator pose and an incoming `rt/lowcmd` target. "
+            "Use 0 to disable bounded-motion rejection."
+        ),
+    )
+    parser.add_argument(
         "--enable-lowcmd-subscriber",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help=(
             "Create the `rt/lowcmd` subscriber and apply accepted body commands "
-            "into the live articulation."
+            "into the live articulation. Enabled by default."
         ),
     )
     parser.add_argument(
@@ -209,16 +327,171 @@ def build_arg_parser() -> argparse.ArgumentParser:
             "this ratio, the runtime emits a warning instead of an info log."
         ),
     )
+    parser.add_argument(
+        "--unitree-ros2-install-prefix",
+        type=Path,
+        default=None,
+        help=(
+            "Path to the built `unitree_ros2/cyclonedds_ws/install` prefix. "
+            "If omitted, the runtime also checks the UNITREE_ROS2_INSTALL_PREFIX "
+            "environment variable and the default ~/Workspaces/unitree_ros2 "
+            "location."
+        ),
+    )
+    parser.add_argument(
+        "--ros2-python-exe",
+        type=str,
+        default=os.environ.get("ROS2_PYTHON_EXE", "/usr/bin/python3"),
+        help="Python executable used for the ROS 2 sidecar bridge process.",
+    )
+    parser.add_argument(
+        "--bridge-bind-host",
+        type=str,
+        default="127.0.0.1",
+        help="Localhost interface used for Isaac Sim <-> ROS 2 sidecar UDP traffic.",
+    )
+    parser.add_argument(
+        "--bridge-lowstate-port",
+        type=int,
+        default=35501,
+        help="UDP port used for Isaac Sim -> sidecar lowstate packets.",
+    )
+    parser.add_argument(
+        "--bridge-lowcmd-port",
+        type=int,
+        default=35502,
+        help="UDP port used for sidecar -> Isaac Sim lowcmd packets.",
+    )
+    parser.add_argument(
+        "--enable-livox-lidar",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Create an Isaac RTX LiDAR that approximates the inverted Livox "
+            "MID360 and publishes PointCloud2 through the Isaac ROS 2 bridge. "
+            "Enabled by default."
+        ),
+    )
+    parser.add_argument(
+        "--livox-lidar-topic",
+        type=str,
+        default="livox/lidar",
+        help="ROS 2 PointCloud2 topic for the simulated MID360 LiDAR.",
+    )
+    parser.add_argument(
+        "--livox-lidar-frame-id",
+        type=str,
+        default="mid360_link",
+        help="Frame id used in the simulated MID360 PointCloud2 messages.",
+    )
+    parser.add_argument(
+        "--livox-lidar-parent-link-name",
+        type=str,
+        default="torso_link",
+        help=(
+            "USD prim name to search for when mounting the simulated MID360. "
+            "The default mirrors the URDF mid360_joint parent."
+        ),
+    )
+    parser.add_argument(
+        "--livox-lidar-prim-name",
+        type=str,
+        default="mid360_link",
+        help=(
+            "USD Xform name created under the parent link for the simulated "
+            "MID360 frame. The default mirrors the URDF child link."
+        ),
+    )
+    parser.add_argument(
+        "--livox-lidar-sensor-prim-name",
+        type=str,
+        default="mid360_rtx_lidar",
+        help="USD prim name for the RTX LiDAR sensor under the MID360 frame.",
+    )
+    parser.add_argument(
+        "--livox-lidar-rtx-config",
+        type=str,
+        default="OS1",
+        help=(
+            "Base Isaac RTX LiDAR config used for the MID360 approximation. "
+            "Use 'none' to create a generic OmniLidar with only explicit attributes."
+        ),
+    )
+    parser.add_argument(
+        "--livox-lidar-rtx-variant",
+        type=str,
+        default="OS1_REV6_32ch20hz1024res",
+        help=(
+            "RTX LiDAR config variant used with --livox-lidar-rtx-config. "
+            "Use 'none' to pass no variant."
+        ),
+    )
     return parser
 
 
+def resolve_unitree_ros2_install_prefix(cli_value: Path | None) -> Path | None:
+    """Resolve the Unitree ROS 2 install prefix from CLI, env, or a default path."""
+    candidates: list[Path] = []
+    if cli_value is not None:
+        candidates.append(cli_value)
+
+    env_value = os.environ.get("UNITREE_ROS2_INSTALL_PREFIX")
+    if env_value:
+        candidates.append(Path(env_value))
+
+    workspace_root = next(
+        (
+            parent
+            for parent in PROJECT_ROOT.parents
+            if parent.name == "src" and parent.parent != parent
+        ),
+        None,
+    )
+    if workspace_root is not None:
+        candidates.append(workspace_root.parent / "unitree_ros2" / "cyclonedds_ws" / "install")
+    candidates.append(Path.home() / "Workspaces" / "unitree_ros2" / "cyclonedds_ws" / "install")
+
+    for candidate in candidates:
+        resolved = candidate.expanduser().resolve()
+        if resolved.exists():
+            return resolved
+    return None
+
+
 def parse_config(argv: list[str] | None = None) -> AppConfig:
-    args = build_arg_parser().parse_args(argv)
+    parser = build_arg_parser()
+    args = parser.parse_args(argv)
+    physics_hz = 1.0 / args.physics_dt
+    if args.lowstate_publish_hz - physics_hz > 1e-9:
+        parser.error(
+            "--lowstate-publish-hz cannot exceed the physics rate derived from "
+            f"--physics-dt. requested={args.lowstate_publish_hz:.3f}Hz "
+            f"physics_rate={physics_hz:.3f}Hz"
+        )
+    if args.lowcmd_max_position_delta_rad < 0.0 or not math.isfinite(args.lowcmd_max_position_delta_rad):
+        parser.error("--lowcmd-max-position-delta-rad must be a finite non-negative float.")
+    for label, value in (
+        ("--livox-lidar-topic", args.livox_lidar_topic),
+        ("--livox-lidar-frame-id", args.livox_lidar_frame_id),
+        ("--livox-lidar-parent-link-name", args.livox_lidar_parent_link_name),
+        ("--livox-lidar-prim-name", args.livox_lidar_prim_name),
+        ("--livox-lidar-sensor-prim-name", args.livox_lidar_sensor_prim_name),
+    ):
+        if not value.strip():
+            parser.error(f"{label} cannot be empty.")
     return AppConfig(
         robot_variant=args.robot_variant,
         asset_path=args.asset_path,
         robot_prim_path=args.robot_prim_path,
         robot_height=args.robot_height,
+        use_world=args.use_world,
+        world_path=args.world_path,
+        world_prim_path=args.world_prim_path,
+        enable_follow_camera=args.enable_follow_camera,
+        follow_camera_prim_path=args.follow_camera_prim_path,
+        follow_camera_distance=args.follow_camera_distance,
+        follow_camera_height=args.follow_camera_height,
+        follow_camera_target_height=args.follow_camera_target_height,
         physics_dt=args.physics_dt,
         headless=args.headless,
         renderer=args.renderer,
@@ -232,8 +505,22 @@ def parse_config(argv: list[str] | None = None) -> AppConfig:
         lowstate_topic=args.lowstate_topic,
         lowcmd_topic=args.lowcmd_topic,
         lowstate_publish_hz=args.lowstate_publish_hz,
+        lowcmd_max_position_delta_rad=args.lowcmd_max_position_delta_rad,
         enable_lowcmd_subscriber=args.enable_lowcmd_subscriber,
         lowcmd_timeout_seconds=args.lowcmd_timeout_seconds,
         lowstate_cadence_report_interval=args.lowstate_cadence_report_interval,
         lowstate_cadence_warn_ratio=args.lowstate_cadence_warn_ratio,
+        unitree_ros2_install_prefix=resolve_unitree_ros2_install_prefix(args.unitree_ros2_install_prefix),
+        ros2_python_exe=args.ros2_python_exe,
+        bridge_bind_host=args.bridge_bind_host,
+        bridge_lowstate_port=args.bridge_lowstate_port,
+        bridge_lowcmd_port=args.bridge_lowcmd_port,
+        enable_livox_lidar=args.enable_livox_lidar,
+        livox_lidar_topic=args.livox_lidar_topic,
+        livox_lidar_frame_id=args.livox_lidar_frame_id,
+        livox_lidar_parent_link_name=args.livox_lidar_parent_link_name,
+        livox_lidar_prim_name=args.livox_lidar_prim_name,
+        livox_lidar_sensor_prim_name=args.livox_lidar_sensor_prim_name,
+        livox_lidar_rtx_config=args.livox_lidar_rtx_config,
+        livox_lidar_rtx_variant=args.livox_lidar_rtx_variant,
     )

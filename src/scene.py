@@ -35,7 +35,7 @@ def import_physics_context():
     return PhysicsContext
 
 
-def build_scene(asset_path: Path, config: AppConfig) -> None:
+def build_scene(asset_path: Path, config: AppConfig, world_path: Path | None = None) -> None:
     import omni.usd
     from pxr import Gf, UsdGeom, UsdLux, UsdPhysics
 
@@ -60,9 +60,16 @@ def build_scene(asset_path: Path, config: AppConfig) -> None:
     physics_scene.CreateGravityMagnitudeAttr().Set(9.81)
 
     LOGGER.info("creating physics context")
-    PhysicsContext(physics_dt=config.physics_dt, prim_path="/World/PhysicsScene")
-    LOGGER.info("creating ground plane")
-    GroundPlane(prim_path="/World/GroundPlane", z_position=0.0)
+    physics_context = PhysicsContext(physics_dt=config.physics_dt, prim_path="/World/PhysicsScene")
+    if config.enable_livox_lidar:
+        physics_context.set_enable_scene_query_support(True)
+        LOGGER.info("enabled PhysX scene query support for simulated Livox MID360 raycasts")
+    if world_path is None:
+        LOGGER.info("creating ground plane")
+        GroundPlane(prim_path="/World/GroundPlane", z_position=0.0)
+    else:
+        LOGGER.info("referencing world asset at %s", config.world_prim_path)
+        add_reference_to_stage(str(world_path), config.world_prim_path)
 
     LOGGER.info("creating light")
     light = UsdLux.DistantLight.Define(stage, "/World/DistantLight")

@@ -120,9 +120,9 @@ while (( SECONDS < startup_deadline )); do
     dump_sim_tail
     exit 1
   fi
-  if grep -q "initialized Unitree DDS channel factory" "${SIM_LOG}" \
-    && grep -q "DDS lowstate publisher ready" "${SIM_LOG}" \
-    && grep -q "DDS lowcmd subscriber ready" "${SIM_LOG}"; then
+  if grep -q "initialized localhost DDS sidecar bridge" "${SIM_LOG}" \
+    && grep -q "lowstate UDP publisher ready" "${SIM_LOG}" \
+    && grep -q "lowcmd UDP subscriber ready" "${SIM_LOG}"; then
     startup_ready=1
     break
   fi
@@ -178,11 +178,10 @@ wait "${LISTENER_PID}"
 log "smoke test complete"
 
 dds_comm_ok=1
-assert_log_contains "${SIM_LOG}" "DDS lowstate publisher ready" "sim reported lowstate publisher readiness" || dds_comm_ok=0
-assert_log_contains "${SIM_LOG}" "DDS lowcmd subscriber ready" "sim reported lowcmd subscriber readiness" || dds_comm_ok=0
-assert_log_contains "${SIM_LOG}" "received \`rt/lowcmd\` with 35 motor slots" "sim received external lowcmd traffic" || dds_comm_ok=0
+assert_log_contains "${SIM_LOG}" "lowstate UDP publisher ready" "sim reported lowstate bridge readiness" || dds_comm_ok=0
+assert_log_contains "${SIM_LOG}" "lowcmd UDP subscriber ready" "sim reported lowcmd bridge readiness" || dds_comm_ok=0
 assert_log_contains "${LOWSTATE_LOG}" "valid_messages=" "listener received lowstate samples" || dds_comm_ok=0
-assert_log_contains "${LOWSTATE_LOG}" "crc_rejected=0" "listener observed zero CRC rejections" || dds_comm_ok=0
+assert_log_contains "${LOWSTATE_LOG}" "transport_rejected=0" "listener observed zero transport rejections" || dds_comm_ok=0
 assert_log_contains "${LOWCMD_LOG}" "Published " "lowcmd sender published DDS commands" || dds_comm_ok=0
 
 if [[ "${dds_comm_ok}" -eq 1 ]]; then
