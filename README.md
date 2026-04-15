@@ -323,6 +323,55 @@ Current runtime expectation:
 - the configured target is `500 Hz`
 - the observed end-to-end ROS 2 rate has been about `467-470 Hz`
 
+## SDK2 Python Policy Smoke Test
+
+Phase 4 validation is automated by:
+
+```bash
+./scripts/run_sdk2py_policy_smoke_test.sh
+```
+
+The script launches Isaac Sim in the default policy mode:
+
+```bash
+isaac_sim_python src/main.py \
+  --headless \
+  --enable-dds \
+  --enable-ros2-lowstate \
+  --no-enable-ros2-lowcmd \
+  --enable-unitree-sdk2py-lowstate \
+  --enable-unitree-sdk2py-lowcmd \
+  --no-enable-native-unitree-lowstate \
+  --no-enable-native-unitree-lowcmd \
+  --dds-domain-id 1 \
+  --unitree-sdk2py-domain-id 1
+```
+
+Before launch it runs conservative startup hygiene for stale repo-owned
+sidecars from interrupted runs. It only targets command lines that point at
+this repository.
+
+It then checks:
+
+- ROS 2 `/rt/lowstate` is visible and receives valid samples
+- ROS 2 `/rt/lowcmd` stays hidden and disabled
+- SDK2 Python `rt/lowstate` is visible to the SDK2 Python listener
+- SDK2 Python `rt/lowcmd` reaches the simulator through the sidecar
+- native Unitree SDK lowstate and lowcmd do not start
+
+Useful overrides:
+
+```bash
+DDS_DOMAIN_ID=1 \
+SDK2PY_DOMAIN_ID=1 \
+SDK2PY_NETWORK_INTERFACE=lo \
+SDK2PY_LOWCMD_JOINT_NAME=left_shoulder_pitch_joint \
+SDK2PY_LOWCMD_OFFSET_RAD=0.05 \
+./scripts/run_sdk2py_policy_smoke_test.sh
+```
+
+Logs are written to `tmp/sdk2py_policy_smoke_logs` by default.
+
 ## Mixed ROS 2 + Native SDK Smoke Test
 
 Phase 3 validation is automated by:
