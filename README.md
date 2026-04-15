@@ -180,25 +180,32 @@ for the troubleshooting note.
 - Isaac Sim and ROS 2 Humble use different Python runtimes on this setup.
   Because of that, ROS 2 runs in a sidecar process rather than in the Isaac
   Sim Python process.
+- The Unitree SDK2 Python runtime is the default policy-facing Unitree path.
+  Isaac Sim exchanges compact localhost UDP packets with a system-Python
+  sidecar that imports `unitree_sdk2py`.
 - The native Unitree SDK bridge is a separate C++ sidecar process. Isaac Sim
   exchanges compact localhost UDP packets with it; the sidecar handles
-  `unitree_sdk2` DDS publication/subscription.
-- Both lowstate paths are enabled by default. ROS 2 publishes `/rt/lowstate`;
-  native SDK publishes `rt/lowstate`.
-- Only one lowcmd source may be active. By default, native SDK `rt/lowcmd` is
+  `unitree_sdk2` DDS publication/subscription. It is available only as an
+  alternate runtime mode and is mutually exclusive with SDK2 Python.
+- ROS 2 lowstate and SDK2 Python lowstate are enabled by default. ROS 2
+  publishes `/rt/lowstate`; SDK2 Python publishes SDK `rt/lowstate`.
+- Only one lowcmd source may be active. By default, SDK2 Python `rt/lowcmd` is
   active and ROS 2 `/rt/lowcmd` command application is disabled. Startup
-  rejects configurations that enable both command sources.
+  rejects configurations that enable multiple command sources.
 - The default lowstate runtime target is `500 Hz`, with:
   - `--physics-dt 0.002`
   - `--lowstate-publish-hz 500`
 - The ROS 2 localhost UDP bridge defaults are:
   - lowstate: `127.0.0.1:35501`
   - lowcmd: `127.0.0.1:35502`
+- The SDK2 Python localhost UDP bridge defaults are:
+  - lowstate: `127.0.0.1:35521`
+  - lowcmd: `127.0.0.1:35522`
 - The native SDK localhost UDP bridge defaults are:
   - lowstate: `127.0.0.1:35511`
   - lowcmd: `127.0.0.1:35512`
-- Startup attempts to clean up stale ROS 2 and native sidecar bridge processes
-  from prior runs before launching fresh bridges.
+- The SDK2 Python policy smoke test runs startup hygiene for stale repo-owned
+  sidecar bridge processes from interrupted runs before launching Isaac Sim.
 - A simulated Livox MID360 RTX LiDAR is enabled by default. It mounts at the
   URDF `torso_link -> mid360_link` transform and publishes `PointCloud2` on
   `/livox/lidar` through Isaac's ROS 2 bridge, not through the LowState /
@@ -268,15 +275,13 @@ ros2 topic list
 Expected topics include:
 
 - `/rt/lowstate`
-- `/rt/lowcmd`
-- `/lowstate`
-- `/lowcmd`
 - `/livox/lidar`
 
-In mixed mode, `/rt/lowstate` is the ROS 2 sidecar topic. The native Unitree
-SDK topics are named `rt/lowstate` and `rt/lowcmd` at the DDS layer; ROS 2 CLI
-discovery may display them as `/lowstate` and `/lowcmd` because ROS 2 maps DDS
-`rt/<name>` topics back to ROS topic names.
+In default policy mode, `/rt/lowstate` is the ROS 2 sidecar topic. ROS 2
+`/rt/lowcmd` is hidden and inactive unless `--enable-ros2-lowcmd` is explicitly
+selected. SDK2 Python topics are named `rt/lowstate` and `rt/lowcmd` at the DDS
+layer, but `ros2 topic list` is not the authoritative SDK2 Python discovery
+tool. Use the SDK2 Python listener scripts for that path.
 
 Inspect lowstate:
 
@@ -285,12 +290,12 @@ ros2 topic echo /rt/lowstate --once
 ```
 
 ROS 2 `/rt/lowcmd` is not the default command source. To intentionally test
-ROS 2 lowcmd instead of native lowcmd, launch with native lowcmd disabled and
-ROS 2 lowcmd enabled:
+ROS 2 lowcmd instead of SDK2 Python lowcmd, launch with SDK2 Python lowcmd
+disabled and ROS 2 lowcmd enabled:
 
 ```bash
 isaac_sim_python src/main.py --headless \
-  --no-enable-native-unitree-lowcmd \
+  --no-enable-unitree-sdk2py-lowcmd \
   --enable-ros2-lowcmd
 ```
 
@@ -435,8 +440,10 @@ The full configuration reference, including world-loading arguments, is in
 - Installation Instructions: [Installation](docs/installation.md)
 - configuration reference: [config.md](config.md)
 - ROS 2 sidecar architecture: [context_ros2_runtime.md](docs/context_ros2_runtime.md)
+- SDK2 Python runtime architecture: [context_unitree_sdk2py_runtime.md](docs/context_unitree_sdk2py_runtime.md)
 - native Unitree SDK bridge architecture: [context_native_bridge.md](docs/context_native_bridge.md)
 - known issues and setup notes: [docs/issues.md](docs/issues.md)
 - active implementation notes: [Agents/dev_log.md](Agents/dev_log.md)
 - implementation plan: [Agents/implementation_plan_ros2.md](Agents/implementation_plan_ros2.md)
 - native SDK implementation plan: [Agents/implementation_plan_native_unitree_sdk.md](Agents/implementation_plan_native_unitree_sdk.md)
+- SDK2 Python runtime implementation plan: [Agents/implementation_plan_unitree_sdk2py_runtime.md](Agents/implementation_plan_unitree_sdk2py_runtime.md)

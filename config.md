@@ -117,6 +117,8 @@ isaac_sim_python src/main.py --use-world
 - Native C++ Unitree SDK and SDK2 Python are mutually exclusive runtime modes.
   SDK2 Python is selected by default; native C++ SDK must be explicitly enabled
   with SDK2 Python disabled.
+- SDK2 Python runtime details and troubleshooting are documented in
+  [`docs/context_unitree_sdk2py_runtime.md`](docs/context_unitree_sdk2py_runtime.md).
 - The simulated MID360 is mounted at the same `torso_link -> mid360_link`
   transform as the URDF and publishes point clouds with `frame_id=mid360_link`.
   Let the URDF / `robot_state_publisher` own TF for this frame.

@@ -8,22 +8,25 @@ validation flow.
 
 ## Current State
 
-The current branch supports mixed low-level DDS operation:
+The current branch keeps native low-level DDS operation as an alternate runtime
+mode:
 
 - ROS 2 lowstate is enabled by default and publishes `/rt/lowstate`.
-- Native Unitree SDK lowstate is enabled by default and publishes SDK
-  `rt/lowstate`.
-- Native Unitree SDK lowcmd is enabled by default and is the active command
-  source.
+- SDK2 Python lowstate and lowcmd are enabled by default and are documented in
+  `context_unitree_sdk2py_runtime.md`.
+- Native Unitree SDK lowstate is disabled by default.
+- Native Unitree SDK lowcmd is disabled by default.
 - ROS 2 lowcmd command application is disabled by default.
-- Startup rejects configurations where ROS 2 lowcmd and native SDK lowcmd are
-  both enabled.
-- Phase 3 mixed-mode validation has passed with
+- Startup rejects configurations where native C++ SDK runtime and SDK2 Python
+  runtime are both enabled.
+- Startup also rejects configurations where ROS 2 lowcmd, SDK2 Python lowcmd,
+  or native SDK lowcmd are enabled together.
+- Native mixed-mode validation is available with
   `scripts/run_parallel_ros2_native_smoke_test.sh`.
 
 This means external ROS 2 tools can keep reading the simulator through
-`/rt/lowstate`, while native Unitree SDK clients can read `rt/lowstate` and
-send bounded `rt/lowcmd` commands.
+`/rt/lowstate`, while native Unitree SDK clients can read `rt/lowstate` and send
+bounded `rt/lowcmd` commands only when native mode is explicitly selected.
 
 ## Why There Are Two Bridge Paths
 
@@ -106,13 +109,14 @@ flowchart LR
 | `native_sdk_bridge/src/lowcmd_offset_tool.cpp` | Validation tool that seeds from native lowstate and publishes a conservative single-joint native lowcmd offset. |
 | `native_sdk_bridge/include/native_sdk_bridge/*` | C++ bridge headers, including CRC utilities and protocol structures. |
 | `scripts/run_parallel_ros2_native_smoke_test.sh` | Phase 3 mixed-mode external validation harness. |
+| `docs/context_unitree_sdk2py_runtime.md` | Default SDK2 Python runtime context and troubleshooting. |
 
 ## Runtime Defaults
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `--enable-native-unitree-lowstate` | enabled | Start native SDK lowstate publication. |
-| `--enable-native-unitree-lowcmd` | enabled | Start native SDK lowcmd ingress and make it the default command source. |
+| `--enable-native-unitree-lowstate` | disabled | Start native SDK lowstate publication only in explicit native mode. |
+| `--enable-native-unitree-lowcmd` | disabled | Start native SDK lowcmd ingress only in explicit native mode. |
 | `--native-unitree-domain-id` | same as `--dds-domain-id` | DDS domain used by the native SDK bridge. |
 | `--native-unitree-lowstate-topic` | `rt/lowstate` | Native SDK lowstate topic. |
 | `--native-unitree-lowcmd-topic` | `rt/lowcmd` | Native SDK lowcmd topic. |
@@ -124,6 +128,20 @@ flowchart LR
 
 The native bridge can run on domain `1` for simulation while the real robot
 remains on domain `0`.
+
+Explicit native mode must disable SDK2 Python runtime:
+
+```bash
+isaac_sim_python src/main.py \
+  --headless \
+  --enable-dds \
+  --enable-ros2-lowstate \
+  --no-enable-ros2-lowcmd \
+  --no-enable-unitree-sdk2py-lowstate \
+  --no-enable-unitree-sdk2py-lowcmd \
+  --enable-native-unitree-lowstate \
+  --enable-native-unitree-lowcmd
+```
 
 ## Startup Flow
 
@@ -218,14 +236,15 @@ flowchart TD
 ```
 
 The native command path shares the same `LowCmdCache` and
-`RobotCommandApplier` safety logic as the ROS 2 path. The active command source
-is selected in `src/main.py`; configuration preflight guarantees that ROS 2
-lowcmd and native lowcmd cannot both be active.
+`RobotCommandApplier` safety logic as the ROS 2 and SDK2 Python paths. The
+active command source is selected in `src/main.py`; configuration preflight
+guarantees that ROS 2 lowcmd, SDK2 Python lowcmd, and native lowcmd cannot be
+active together.
 
 ## Topic Names Seen From ROS 2
 
-When both ROS 2 and native paths are running, `ros2 topic list` can show both
-forms:
+When both ROS 2 and native paths are running in explicit native mode,
+`ros2 topic list` can show both forms:
 
 ```text
 /rt/lowstate
@@ -241,8 +260,9 @@ This is expected in mixed mode:
   as `/lowstate` and `/lowcmd`.
 
 The plain `/lowcmd` topic appearing in discovery does not mean ROS 2 lowcmd is
-controlling the simulator. In the default mode, native SDK lowcmd is the active
-command path and ROS 2 lowcmd command application is disabled.
+controlling the simulator. In native mode, native SDK lowcmd is the active
+command path and ROS 2 lowcmd command application is disabled. In default policy
+mode, SDK2 Python is active and native C++ SDK topics should not be present.
 
 ## Build
 

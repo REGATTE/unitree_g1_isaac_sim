@@ -6,11 +6,11 @@ is extracted, how low-level command and state traffic crosses the ROS 2 /
 CycloneDDS boundary, how the DDS bridge is structured, and how the simulated
 Livox MID360 path fits into the overall runtime.
 
-Current branch note: the default command-authority mode has changed since this
-document was first written. ROS 2 lowstate remains enabled by default, but ROS 2
-lowcmd command application is disabled by default and native Unitree SDK
-`rt/lowcmd` is the active command source. The native bridge is documented in
-`context_native_bridge.md`.
+Current branch note: ROS 2 lowstate remains enabled by default as the
+observation path. ROS 2 lowcmd command application is disabled by default. SDK2
+Python `rt/lowcmd` is the default command source and is documented in
+`context_unitree_sdk2py_runtime.md`. The optional native C++ SDK bridge is
+documented in `context_native_bridge.md`.
 
 The shorter user-facing launch notes remain in `../README.md`. This file is meant
 to be the architecture reference you read when changing or debugging the
@@ -25,13 +25,12 @@ treat the simulator like a robot endpoint.
 The current branch has three major runtime surfaces:
 
 - G1 articulation simulation in Isaac Sim.
-- Low-level robot bridge for `/rt/lowstate` and `/rt/lowcmd`.
+- Low-level robot bridge for `/rt/lowstate` and optional `/rt/lowcmd`.
 - Simulated Livox MID360 point cloud publication on `/livox/lidar`.
 
-The low-level bridge is not a direct in-process `unitree_sdk2py` DDS bridge on
-this branch. Instead, Isaac Sim communicates with a system-Python ROS 2 sidecar
-over localhost UDP. The sidecar publishes and subscribes `unitree_hg` ROS 2
-messages through CycloneDDS.
+The ROS 2 low-level bridge is a system-Python sidecar over localhost UDP. The
+sidecar publishes `unitree_hg` ROS 2 lowstate by default. Its lowcmd subscriber
+is created only when `--enable-ros2-lowcmd` is explicitly selected.
 
 ## High-Level Architecture
 
@@ -174,7 +173,10 @@ Important defaults on this branch:
 | `--robot-prim-path` | `/World/G1` | Where the robot USD is referenced. |
 | `--physics-dt` | `0.002` | 500 Hz physics loop. |
 | `--enable-dds` | enabled | Starts the ROS 2 sidecar bridge by default. |
-| `--enable-lowcmd-subscriber` | enabled | Accepts `/rt/lowcmd` by default. |
+| `--enable-ros2-lowstate` | enabled | Publishes ROS 2 `/rt/lowstate` by default. |
+| `--enable-ros2-lowcmd` | disabled | Accepts ROS 2 `/rt/lowcmd` only when explicitly enabled. |
+| `--enable-unitree-sdk2py-lowstate` | enabled | Publishes SDK2 Python `rt/lowstate` by default. |
+| `--enable-unitree-sdk2py-lowcmd` | enabled | Default lowcmd authority for SDK2 Python policy clients. |
 | `--lowstate-publish-hz` | `500.0` | Lowstate target rate. Cannot exceed physics rate. |
 | `--dds-domain-id` | `1` | ROS 2 / CycloneDDS domain. |
 | `--bridge-bind-host` | `127.0.0.1` | Local UDP interface between Isaac and sidecar. |
@@ -555,7 +557,9 @@ flowchart TD
 
 Important safety and freshness behavior:
 
-- `--enable-lowcmd-subscriber` can disable command ingestion.
+- ROS 2 lowcmd ingestion is disabled by default.
+- `--enable-ros2-lowcmd` enables ROS 2 lowcmd only when SDK2 Python lowcmd and
+  native lowcmd are disabled.
 - A cached command is considered stale after `--lowcmd-timeout-seconds`.
 - If the timeout is `0`, cached commands never expire.
 - `--lowcmd-max-position-delta-rad` rejects large position jumps relative to
@@ -772,12 +776,12 @@ flowchart TD
 
 ## Runtime Topics
 
-Expected ROS 2 topics when running the default branch configuration:
+Relevant ROS 2 topics in the current branch:
 
 | Topic | Direction | Message | Producer |
 | --- | --- | --- | --- |
 | `/rt/lowstate` | simulator -> ROS 2 | `unitree_hg/msg/LowState` | sidecar from Isaac UDP packets |
-| `/rt/lowcmd` | ROS 2 -> simulator | `unitree_hg/msg/LowCmd` | external ROS 2 apps, consumed by sidecar |
+| `/rt/lowcmd` | ROS 2 -> simulator | `unitree_hg/msg/LowCmd` | optional; only present when `--enable-ros2-lowcmd` is selected |
 | `/clock` | simulator -> ROS 2 | `rosgraph_msgs/msg/Clock` | Isaac native publisher |
 | `/livox/lidar` | simulator -> ROS 2 | `sensor_msgs/msg/PointCloud2` | Isaac native publisher |
 
@@ -846,6 +850,9 @@ ros2 topic echo /livox/lidar --once
 Publish a minimal lowcmd:
 
 ```bash
+isaac_sim_python src/main.py --headless \
+  --no-enable-unitree-sdk2py-lowcmd \
+  --enable-ros2-lowcmd
 ros2 topic pub --once /rt/lowcmd unitree_hg/msg/LowCmd "{mode_pr: 0, mode_machine: 0}"
 ```
 
@@ -942,12 +949,13 @@ Check:
 - the sidecar did not exit unexpectedly
 - `RMW_IMPLEMENTATION=rmw_cyclonedds_cpp` is set in the ROS 2 terminal
 
-### Lowcmd Does Not Move The Robot
+### ROS 2 Lowcmd Does Not Move The Robot
 
 Check:
 
 - `/rt/lowcmd` is published in the same ROS 2 domain
-- `--enable-lowcmd-subscriber` was not disabled
+- `--enable-ros2-lowcmd` was selected
+- SDK2 Python lowcmd and native lowcmd are disabled
 - command has at least 29 motor slots
 - command is not stale under `--lowcmd-timeout-seconds`
 - target positions are within `--lowcmd-max-position-delta-rad`
