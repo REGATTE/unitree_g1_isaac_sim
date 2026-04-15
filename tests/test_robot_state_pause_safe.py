@@ -53,11 +53,24 @@ class _FakeArticulation:
         self._efforts = list(values)
 
 
+class _FakeTorsoImu:
+    def __init__(self):
+        self.initialize_calls = 0
+        self.reset_calls = 0
+
+    def initialize(self):
+        self.initialize_calls += 1
+
+    def reset(self):
+        self.reset_calls += 1
+
+
 class RobotStatePauseSafeTests(unittest.TestCase):
     def _make_reader(self, articulation):
         reader = object.__new__(RobotStateReader)
         reader._articulation = articulation
         reader._initialized = True
+        reader._torso_imu = _FakeTorsoImu()
         reader._warned_physics_view_unavailable = False
         return reader
 
@@ -127,6 +140,7 @@ class RobotStatePauseSafeTests(unittest.TestCase):
         self.assertEqual(articulation.last_set_velocities, [0.0, 0.0])
         self.assertEqual(articulation.last_set_efforts, [0.0, 0.0])
         self.assertIsNot(reader._imu, original_imu)
+        self.assertEqual(reader._torso_imu.reset_calls, 1)
 
     def test_reinitialize_after_world_reset_rebinds_articulation(self):
         articulation = _FakeArticulation(
@@ -142,6 +156,8 @@ class RobotStatePauseSafeTests(unittest.TestCase):
         reader.reinitialize_after_world_reset()
 
         self.assertEqual(articulation.initialize_calls, 1)
+        self.assertEqual(reader._torso_imu.reset_calls, 1)
+        self.assertEqual(reader._torso_imu.initialize_calls, 1)
         self.assertTrue(reader._initialized)
         self.assertFalse(reader._warned_physics_view_unavailable)
 

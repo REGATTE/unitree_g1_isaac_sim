@@ -18,9 +18,11 @@ from dds.common.timing import CadenceTracker, compute_publish_period, is_fresh
 
 from .lowcmd import G1LowCmdSubscriber
 from .lowstate import G1LowStatePublisher
+from .secondary_imu import G1SecondaryImuPublisher
 
 
 LOGGER = get_logger("dds.manager")
+ROS2_SECONDARY_IMU_PORT = 35503
 
 
 @dataclass(frozen=True)
@@ -45,6 +47,10 @@ class DdsManager:
         self._lowstate_publisher = G1LowStatePublisher(
             host=config.bridge_bind_host,
             port=config.bridge_lowstate_port,
+        )
+        self._secondary_imu_publisher = G1SecondaryImuPublisher(
+            host=config.bridge_bind_host,
+            port=ROS2_SECONDARY_IMU_PORT,
         )
         self._lowcmd_subscriber = G1LowCmdSubscriber(
             bind_host=config.bridge_bind_host,
@@ -82,6 +88,7 @@ class DdsManager:
             else:
                 LOGGER.info("ROS 2 lowcmd subscriber disabled for this run")
             self._start_sidecar_bridge()
+            self._secondary_imu_publisher.initialize()
             if self._config.enable_ros2_lowstate:
                 self._lowstate_publisher.initialize()
             else:
@@ -112,25 +119,25 @@ class DdsManager:
         lowstate_published = False
         if (
             self._sdk_enabled
-            and self._config.enable_ros2_lowstate
             and simulation_time_seconds >= self._next_lowstate_publish_time
         ):
-            lowstate_published = self._lowstate_publisher.publish(snapshot)
+            if self._config.enable_ros2_lowstate:
+                lowstate_published = self._lowstate_publisher.publish(snapshot)
+            self._secondary_imu_publisher.publish(snapshot)
             self._advance_lowstate_publish_schedule(simulation_time_seconds)
-            if lowstate_published:
-                wall_clock_seconds = time.monotonic()
-                self._simulation_cadence.record(
-                    simulation_time_seconds,
-                    expected_hz=self._config.lowstate_publish_hz,
-                    interval=self._config.lowstate_cadence_report_interval,
-                    warn_ratio=self._config.lowstate_cadence_warn_ratio,
-                )
-                self._wall_clock_cadence.record(
-                    wall_clock_seconds,
-                    expected_hz=self._config.lowstate_publish_hz,
-                    interval=self._config.lowstate_cadence_report_interval,
-                    warn_ratio=self._config.lowstate_cadence_warn_ratio,
-                )
+            wall_clock_seconds = time.monotonic()
+            self._simulation_cadence.record(
+                simulation_time_seconds,
+                expected_hz=self._config.lowstate_publish_hz,
+                interval=self._config.lowstate_cadence_report_interval,
+                warn_ratio=self._config.lowstate_cadence_warn_ratio,
+            )
+            self._wall_clock_cadence.record(
+                wall_clock_seconds,
+                expected_hz=self._config.lowstate_publish_hz,
+                interval=self._config.lowstate_cadence_report_interval,
+                warn_ratio=self._config.lowstate_cadence_warn_ratio,
+            )
 
         active_lowcmd = self._resolve_latest_lowcmd(now_monotonic=time.monotonic())
 
@@ -154,10 +161,15 @@ class DdsManager:
                 self._bridge_process.wait(timeout=5.0)
         self._bridge_process = None
         self._lowstate_publisher.close()
+        self._secondary_imu_publisher.close()
         self._lowcmd_subscriber.close()
         self._lowstate_publisher = G1LowStatePublisher(
             host=self._config.bridge_bind_host,
             port=self._config.bridge_lowstate_port,
+        )
+        self._secondary_imu_publisher = G1SecondaryImuPublisher(
+            host=self._config.bridge_bind_host,
+            port=ROS2_SECONDARY_IMU_PORT,
         )
         self._lowcmd_subscriber = G1LowCmdSubscriber(
             bind_host=self._config.bridge_bind_host,
@@ -248,10 +260,13 @@ class DdsManager:
             f"source '{install_prefix / 'setup.bash'}' >/dev/null 2>&1 && "
             f"exec '{ros2_python_exe}' '{sidecar_script}' "
             f"--lowstate-topic '{self._config.lowstate_topic}' "
+            f"--secondary-imu-topic 'rt/secondary_imu' "
             f"--lowcmd-topic '{self._config.lowcmd_topic}' "
             f"--bind-host '{self._config.bridge_bind_host}' "
             f"--lowstate-port {self._config.bridge_lowstate_port} "
+            f"--secondary-imu-port {ROS2_SECONDARY_IMU_PORT} "
             f"--lowcmd-port {self._lowcmd_subscriber.bound_port}"
+            f" --enable-secondary-imu"
             f"{lowcmd_flag}"
         )
         self._bridge_process = subprocess.Popen(

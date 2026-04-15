@@ -80,6 +80,15 @@ class _FakeCrc:
         return 123456
 
 
+class _FakeStandaloneImuState:
+    def __init__(self):
+        self.quaternion = [0.0, 0.0, 0.0, 0.0]
+        self.gyroscope = [0.0, 0.0, 0.0]
+        self.accelerometer = [0.0, 0.0, 0.0]
+        self.rpy = [0.0, 0.0, 0.0]
+        self.temperature = 0
+
+
 class UnitreeSdk2PySidecarTests(unittest.TestCase):
     def test_build_lowstate_message_maps_body_joints_and_crc(self):
         crc = _FakeCrc()
@@ -88,6 +97,7 @@ class UnitreeSdk2PySidecarTests(unittest.TestCase):
             "imu_quaternion_wxyz": [1.0, 0.1, 0.2, 0.3],
             "imu_gyroscope_body": [0.4, 0.5, 0.6],
             "imu_accelerometer_body": [0.7, 0.8, 0.9],
+            "imu_rpy": [0.11, 0.22, 0.33],
             "joint_positions_dds": [float(index) for index in range(29)],
             "joint_velocities_dds": [float(index) + 0.1 for index in range(29)],
             "joint_efforts_dds": [float(index) + 0.2 for index in range(29)],
@@ -100,6 +110,7 @@ class UnitreeSdk2PySidecarTests(unittest.TestCase):
         self.assertEqual(message.imu_state.quaternion, [1.0, 0.1, 0.2, 0.3])
         self.assertEqual(message.imu_state.gyroscope, [0.4, 0.5, 0.6])
         self.assertEqual(message.imu_state.accelerometer, [0.7, 0.8, 0.9])
+        self.assertEqual(message.imu_state.rpy, [0.11, 0.22, 0.33])
         self.assertEqual(message.motor_state[0].q, 0.0)
         self.assertEqual(message.motor_state[0].dq, 0.1)
         self.assertEqual(message.motor_state[0].tau_est, 0.2)
@@ -107,6 +118,21 @@ class UnitreeSdk2PySidecarTests(unittest.TestCase):
         self.assertEqual(message.motor_state[34].q, 0.0)
         self.assertEqual(message.crc, 123456)
         self.assertIs(crc.message, message)
+
+    def test_build_secondary_imu_message_maps_quaternion_rates_accel_and_rpy(self):
+        payload = {
+            "quaternion_wxyz": [1.0, 0.0, 0.0, 0.0],
+            "gyroscope_body": [0.1, 0.2, 0.3],
+            "accelerometer_body": [0.4, 0.5, 0.6],
+            "rpy": [0.7, 0.8, 0.9],
+        }
+
+        message = unitree_sdk2py_sidecar.build_secondary_imu_message(payload, _FakeStandaloneImuState)
+
+        self.assertEqual(message.quaternion, [1.0, 0.0, 0.0, 0.0])
+        self.assertEqual(message.gyroscope, [0.1, 0.2, 0.3])
+        self.assertEqual(message.accelerometer, [0.4, 0.5, 0.6])
+        self.assertEqual(message.rpy, [0.7, 0.8, 0.9])
 
     def test_build_lowcmd_packet_maps_first_29_body_joints(self):
         message = _FakeLowCmd()
