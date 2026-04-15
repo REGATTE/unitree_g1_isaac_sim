@@ -310,20 +310,31 @@ Work items:
 
 1. Add a smoke-test script, for example
    `scripts/run_sdk2py_policy_smoke_test.sh`.
-2. Launch Isaac Sim in ROS 2 lowstate + SDK2 Python lowstate/lowcmd mode.
-3. Start an SDK2 Python lowstate listener.
-4. Send a conservative SDK2 Python lowcmd offset.
-5. Confirm:
+2. Add a startup hygiene step before launching Isaac Sim:
+   - detect orphaned repo-owned sidecars from prior interrupted runs
+     (`ros2_cyclonedds_sidecar.py`, `unitree_sdk2py_sidecar.py`, and native
+     bridge helpers)
+   - terminate only processes whose command line points at this repository
+   - wait briefly for clean exit, then report any remaining process IDs instead
+     of killing unrelated user processes
+   - restart or bypass the ROS 2 daemon for the smoke-test shell so stale graph
+     discovery does not hide the current run state
+3. Launch Isaac Sim in ROS 2 lowstate + SDK2 Python lowstate/lowcmd mode.
+4. Start an SDK2 Python lowstate listener.
+5. Send a conservative SDK2 Python lowcmd offset.
+6. Confirm:
    - ROS 2 `/rt/lowstate` is still visible
    - SDK2 Python `rt/lowstate` is visible
    - SDK2 Python `rt/lowcmd` reaches the simulator
    - native C++ SDK bridge is not running
    - ROS 2 lowcmd remains disabled
-6. Write logs under `tmp/sdk2py_policy_smoke_logs/`.
+   - no stale sidecar process from an earlier run is reused
+7. Write logs under `tmp/sdk2py_policy_smoke_logs/`.
 
 Deliverables:
 
 - repeatable SDK2 Python policy smoke test
+- conservative startup hygiene for interrupted simulator restarts
 - documented expected log markers
 - validation summary suitable for PR review
 
