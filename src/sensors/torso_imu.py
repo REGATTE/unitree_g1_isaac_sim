@@ -149,6 +149,27 @@ def _find_link_prim(stage, robot_prim_path: str, link_name: str):
     return None
 
 
+def quaternion_wxyz_to_rpy(quaternion_wxyz: Sequence[float]) -> tuple[float, float, float]:
+    """Convert a `wxyz` quaternion into roll, pitch, yaw in radians."""
+    w, x, y, z = _normalize_quaternion_wxyz(quaternion_wxyz)
+
+    sinr_cosp = 2.0 * ((w * x) + (y * z))
+    cosr_cosp = 1.0 - 2.0 * ((x * x) + (y * y))
+    roll = math.atan2(sinr_cosp, cosr_cosp)
+
+    sinp = 2.0 * ((w * y) - (z * x))
+    if abs(sinp) >= 1.0:
+        pitch = math.copysign(math.pi / 2.0, sinp)
+    else:
+        pitch = math.asin(sinp)
+
+    siny_cosp = 2.0 * ((w * z) + (x * y))
+    cosy_cosp = 1.0 - 2.0 * ((y * y) + (z * z))
+    yaw = math.atan2(siny_cosp, cosy_cosp)
+
+    return (roll, pitch, yaw)
+
+
 def _estimate_body_angular_velocity(
     previous_quaternion_wxyz: Sequence[float] | None,
     current_quaternion_wxyz: Sequence[float],

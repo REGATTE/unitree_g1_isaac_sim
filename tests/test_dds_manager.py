@@ -53,6 +53,21 @@ class _FakeLowStatePublisher:
         return None
 
 
+class _FakeSecondaryImuPublisher:
+    def __init__(self):
+        self.publish_calls = 0
+
+    def initialize(self):
+        return True
+
+    def publish(self, snapshot):
+        self.publish_calls += 1
+        return True
+
+    def close(self):
+        return None
+
+
 def _build_config(**overrides) -> AppConfig:
     config = AppConfig(
         robot_variant="29dof",
@@ -187,6 +202,7 @@ class DdsManagerTests(unittest.TestCase):
         manager._initialized = True
         manager._sdk_enabled = True
         manager._lowstate_publisher = _FakeLowStatePublisher()
+        manager._secondary_imu_publisher = _FakeSecondaryImuPublisher()
         manager._lowcmd_subscriber = _FakeLowCmdSubscriber()
 
         snapshot = object()
@@ -202,6 +218,7 @@ class DdsManagerTests(unittest.TestCase):
             [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12],
         )
         self.assertEqual(manager._lowstate_publisher.publish_calls, len(published_frames))
+        self.assertEqual(manager._secondary_imu_publisher.publish_calls, len(published_frames))
 
     def test_reset_runtime_state_clears_transient_dds_state(self):
         manager = DdsManager(_build_config())
@@ -240,6 +257,7 @@ class DdsManagerTests(unittest.TestCase):
         manager._initialized = True
         manager._sdk_enabled = True
         manager._lowstate_publisher = _FakeLowStatePublisher()
+        manager._secondary_imu_publisher = _FakeSecondaryImuPublisher()
         cached = LowCmdCache(
             mode_pr=0,
             mode_machine=0,
@@ -293,6 +311,9 @@ class DdsManagerTests(unittest.TestCase):
 
         command = popen_mock.call_args.args[0][2]
         self.assertNotIn("--enable-lowcmd", command)
+        self.assertIn("--secondary-imu-topic 'rt/secondary_imu'", command)
+        self.assertIn("--secondary-imu-port 35503", command)
+        self.assertIn("--enable-secondary-imu", command)
         self.assertIn("--lowcmd-port 35502", command)
 
     def test_sidecar_launch_enables_lowcmd_subscription_when_ros2_lowcmd_enabled(self):
@@ -309,6 +330,9 @@ class DdsManagerTests(unittest.TestCase):
                 manager._start_sidecar_bridge()
 
         command = popen_mock.call_args.args[0][2]
+        self.assertIn("--secondary-imu-topic 'rt/secondary_imu'", command)
+        self.assertIn("--secondary-imu-port 35503", command)
+        self.assertIn("--enable-secondary-imu", command)
         self.assertIn("--enable-lowcmd", command)
 
 

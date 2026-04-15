@@ -24,16 +24,17 @@ class BridgeProtocolTests(unittest.TestCase):
             base_quaternion_wxyz=(1.0, 0.1, 0.2, 0.3),
             base_linear_velocity_world=(0.0, 0.0, 0.0),
             base_angular_velocity_world=(0.0, 0.0, 0.0),
-            imu_quaternion_wxyz=(0.5, 0.5, 0.5, 0.5),
+            imu_quaternion_wxyz=(1.0, 0.1, 0.2, 0.3),
             imu_linear_acceleration_body=(0.0, 0.0, 9.81),
             imu_angular_velocity_body=(0.0, 0.0, 0.0),
+            secondary_imu_quaternion_wxyz=(0.5, 0.5, 0.5, 0.5),
         )
 
         packet = encode_lowstate_packet(snapshot, tick=42)
         payload = decode_lowstate_packet(packet)
 
         self.assertEqual(payload["tick"], 42)
-        self.assertEqual(payload["imu_quaternion_wxyz"], [0.5, 0.5, 0.5, 0.5])
+        self.assertEqual(payload["imu_quaternion_wxyz"], [1.0, 0.1, 0.2, 0.3])
 
 
 if __name__ == "__main__":

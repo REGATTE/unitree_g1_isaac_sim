@@ -7,6 +7,7 @@ from typing import Any
 
 from mapping import to_dds_ordered_snapshot
 from robot_state import JointStateSnapshot, RobotKinematicSnapshot
+from sensors.torso_imu import quaternion_wxyz_to_rpy
 
 
 def encode_native_lowstate_packet(snapshot: RobotKinematicSnapshot, tick: int) -> bytes:
@@ -27,12 +28,29 @@ def encode_native_lowstate_packet(snapshot: RobotKinematicSnapshot, tick: int) -
         "imu_quaternion_wxyz": [float(value) for value in snapshot.imu_quaternion_wxyz],
         "imu_accelerometer_body": [float(value) for value in snapshot.imu_linear_acceleration_body],
         "imu_gyroscope_body": [float(value) for value in snapshot.imu_angular_velocity_body],
+        "imu_rpy": [float(value) for value in quaternion_wxyz_to_rpy(snapshot.imu_quaternion_wxyz)],
     }
     return json.dumps(payload, separators=(",", ":")).encode("utf-8")
 
 
 def decode_native_lowstate_packet(packet: bytes) -> dict[str, Any]:
     """Parse a native lowstate localhost packet."""
+    return json.loads(packet.decode("utf-8"))
+
+
+def encode_native_secondary_imu_packet(snapshot: RobotKinematicSnapshot) -> bytes:
+    """Serialize the torso/secondary IMU sample for SDK2 Python sidecar use."""
+    payload = {
+        "quaternion_wxyz": [float(value) for value in snapshot.secondary_imu_quaternion_wxyz],
+        "accelerometer_body": [float(value) for value in snapshot.secondary_imu_linear_acceleration_body],
+        "gyroscope_body": [float(value) for value in snapshot.secondary_imu_angular_velocity_body],
+        "rpy": [float(value) for value in quaternion_wxyz_to_rpy(snapshot.secondary_imu_quaternion_wxyz)],
+    }
+    return json.dumps(payload, separators=(",", ":")).encode("utf-8")
+
+
+def decode_native_secondary_imu_packet(packet: bytes) -> dict[str, Any]:
+    """Parse a native secondary-imu localhost packet."""
     return json.loads(packet.decode("utf-8"))
 
 

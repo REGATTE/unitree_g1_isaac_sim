@@ -7,6 +7,7 @@ from typing import Any
 
 from robot_state import JointStateSnapshot, RobotKinematicSnapshot
 from mapping import to_dds_ordered_snapshot
+from sensors.torso_imu import quaternion_wxyz_to_rpy
 
 
 def encode_lowstate_packet(snapshot: RobotKinematicSnapshot, tick: int) -> bytes:
@@ -27,12 +28,29 @@ def encode_lowstate_packet(snapshot: RobotKinematicSnapshot, tick: int) -> bytes
         "imu_quaternion_wxyz": [float(value) for value in snapshot.imu_quaternion_wxyz],
         "imu_accelerometer": [float(value) for value in snapshot.imu_linear_acceleration_body],
         "imu_gyroscope": [float(value) for value in snapshot.imu_angular_velocity_body],
+        "imu_rpy": [float(value) for value in quaternion_wxyz_to_rpy(snapshot.imu_quaternion_wxyz)],
     }
     return json.dumps(payload, separators=(",", ":")).encode("utf-8")
 
 
 def decode_lowstate_packet(packet: bytes) -> dict[str, Any]:
     """Parse a lowstate localhost packet."""
+    return json.loads(packet.decode("utf-8"))
+
+
+def encode_secondary_imu_packet(snapshot: RobotKinematicSnapshot) -> bytes:
+    """Serialize the torso/secondary IMU sample into a compact localhost packet."""
+    payload = {
+        "quaternion_wxyz": [float(value) for value in snapshot.secondary_imu_quaternion_wxyz],
+        "accelerometer": [float(value) for value in snapshot.secondary_imu_linear_acceleration_body],
+        "gyroscope": [float(value) for value in snapshot.secondary_imu_angular_velocity_body],
+        "rpy": [float(value) for value in quaternion_wxyz_to_rpy(snapshot.secondary_imu_quaternion_wxyz)],
+    }
+    return json.dumps(payload, separators=(",", ":")).encode("utf-8")
+
+
+def decode_secondary_imu_packet(packet: bytes) -> dict[str, Any]:
+    """Parse a secondary-imu localhost packet."""
     return json.loads(packet.decode("utf-8"))
 
 

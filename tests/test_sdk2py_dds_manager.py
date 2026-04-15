@@ -33,6 +33,24 @@ class _FakeSdk2PyLowStatePublisher:
         self.close_calls += 1
 
 
+class _FakeSdk2PySecondaryImuPublisher:
+    def __init__(self):
+        self.publish_calls = 0
+        self.initialize_calls = 0
+        self.close_calls = 0
+
+    def initialize(self):
+        self.initialize_calls += 1
+        return True
+
+    def publish(self, snapshot):
+        self.publish_calls += 1
+        return True
+
+    def close(self):
+        self.close_calls += 1
+
+
 class _FakeSdk2PyLowCmdSubscriber:
     def __init__(self, command=None):
         self.latest_command = command
@@ -131,6 +149,7 @@ class UnitreeSdk2PyDdsManagerTests(unittest.TestCase):
             )
         )
         manager._lowstate_publisher = _FakeSdk2PyLowStatePublisher()
+        manager._secondary_imu_publisher = _FakeSdk2PySecondaryImuPublisher()
         manager._lowcmd_subscriber = _FakeSdk2PyLowCmdSubscriber()
 
         with patch.object(manager, "_cleanup_stale_sidecars"):
@@ -150,6 +169,11 @@ class UnitreeSdk2PyDdsManagerTests(unittest.TestCase):
         self.assertIn("eth0", command)
         self.assertIn("--lowstate-port", command)
         self.assertIn(str(SDK2PY_UDP_LOWSTATE_PORT), command)
+        self.assertIn("--secondary-imu-topic", command)
+        self.assertIn("rt/secondary_imu", command)
+        self.assertIn("--secondary-imu-port", command)
+        self.assertIn("35523", command)
+        self.assertIn("--enable-secondary-imu", command)
         self.assertIn("--enable-lowstate", command)
         self.assertIn("--enable-lowcmd", command)
         self.assertIn("--lowcmd-topic", command)
@@ -157,6 +181,7 @@ class UnitreeSdk2PyDdsManagerTests(unittest.TestCase):
         self.assertIn("--lowcmd-port", command)
         self.assertIn("45679", command)
         self.assertEqual(manager._lowstate_publisher.initialize_calls, 1)
+        self.assertEqual(manager._secondary_imu_publisher.initialize_calls, 1)
         self.assertEqual(manager._lowcmd_subscriber.initialize_calls, 1)
 
     def test_initialize_starts_sidecar_when_only_lowcmd_is_selected(self):
@@ -184,6 +209,7 @@ class UnitreeSdk2PyDdsManagerTests(unittest.TestCase):
         manager._initialized = True
         manager._sdk_enabled = True
         manager._lowstate_publisher = _FakeSdk2PyLowStatePublisher()
+        manager._secondary_imu_publisher = _FakeSdk2PySecondaryImuPublisher()
         manager._lowcmd_subscriber = _FakeSdk2PyLowCmdSubscriber()
 
         snapshot = object()
@@ -199,6 +225,7 @@ class UnitreeSdk2PyDdsManagerTests(unittest.TestCase):
             [1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12],
         )
         self.assertEqual(manager._lowstate_publisher.publish_calls, len(published_frames))
+        self.assertEqual(manager._secondary_imu_publisher.publish_calls, len(published_frames))
 
     def test_reset_runtime_state_clears_sdk2py_cadence_state(self):
         manager = UnitreeSdk2PyDdsManager(_build_config())
@@ -286,6 +313,7 @@ class UnitreeSdk2PyDdsManagerTests(unittest.TestCase):
         manager._initialized = True
         manager._sdk_enabled = True
         manager._lowstate_publisher = _FakeSdk2PyLowStatePublisher()
+        manager._secondary_imu_publisher = _FakeSdk2PySecondaryImuPublisher()
         manager._lowcmd_subscriber = _FakeSdk2PyLowCmdSubscriber(command=command)
 
         result = manager.step(1.0 / 120.0, object())

@@ -17,7 +17,11 @@ for import_root in (SRC_ROOT, LOCAL_SDK2PY_ROOT):
     if import_root.exists() and str(import_root) not in sys.path:
         sys.path.insert(0, str(import_root))
 
-from dds.native.bridge_protocol import decode_native_lowstate_packet, encode_native_lowcmd_packet
+from dds.native.bridge_protocol import (
+    decode_native_lowstate_packet,
+    decode_native_secondary_imu_packet,
+    encode_native_lowcmd_packet,
+)
 
 
 BODY_JOINT_COUNT = 29
@@ -27,10 +31,19 @@ TOTAL_MOTOR_SLOTS = 35
 def _load_sdk2py_modules():
     from unitree_sdk2py.core.channel import ChannelFactoryInitialize, ChannelPublisher, ChannelSubscriber
     from unitree_sdk2py.idl.default import unitree_hg_msg_dds__LowState_
-    from unitree_sdk2py.idl.unitree_hg.msg.dds_ import LowCmd_, LowState_
+    from unitree_sdk2py.idl.unitree_hg.msg.dds_ import IMUState_, LowCmd_, LowState_
     from unitree_sdk2py.utils.crc import CRC
 
-    return ChannelFactoryInitialize, ChannelPublisher, ChannelSubscriber, LowState_, LowCmd_, unitree_hg_msg_dds__LowState_, CRC
+    return (
+        ChannelFactoryInitialize,
+        ChannelPublisher,
+        ChannelSubscriber,
+        LowState_,
+        LowCmd_,
+        IMUState_,
+        unitree_hg_msg_dds__LowState_,
+        CRC,
+    )
 
 
 class UnitreeSdk2PySidecar:
@@ -48,6 +61,9 @@ class UnitreeSdk2PySidecar:
         lowcmd_port: int,
         enable_lowstate: bool,
         enable_lowcmd: bool,
+        enable_secondary_imu: bool,
+        secondary_imu_topic: str,
+        secondary_imu_port: int,
     ) -> None:
         (
             channel_factory_initialize,
@@ -55,6 +71,7 @@ class UnitreeSdk2PySidecar:
             channel_subscriber,
             lowstate_type,
             lowcmd_type,
+            imu_state_type,
             lowstate_factory,
             crc_type,
         ) = _load_sdk2py_modules()
@@ -67,7 +84,12 @@ class UnitreeSdk2PySidecar:
         if enable_lowstate:
             self._lowstate_publisher = channel_publisher(lowstate_topic, lowstate_type)
             self._lowstate_publisher.Init()
+        self._secondary_imu_publisher = None
+        if enable_secondary_imu:
+            self._secondary_imu_publisher = channel_publisher(secondary_imu_topic, imu_state_type)
+            self._secondary_imu_publisher.Init()
         self._lowstate_factory = lowstate_factory
+        self._imu_state_type = imu_state_type
         self._crc = crc_type()
 
         self._recv_socket = None
@@ -76,6 +98,12 @@ class UnitreeSdk2PySidecar:
             self._recv_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self._recv_socket.bind((bind_host, lowstate_port))
             self._recv_socket.setblocking(False)
+        self._secondary_imu_recv_socket = None
+        if enable_secondary_imu:
+            self._secondary_imu_recv_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self._secondary_imu_recv_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self._secondary_imu_recv_socket.bind((bind_host, secondary_imu_port))
+            self._secondary_imu_recv_socket.setblocking(False)
 
         self._lowcmd_send_socket = None
         self._lowcmd_subscriber = None
@@ -88,8 +116,9 @@ class UnitreeSdk2PySidecar:
             "SDK2 Python sidecar initialized "
             f"(domain_id={domain_id}, lowstate_enabled={enable_lowstate}, lowstate_topic={lowstate_topic}, "
             f"lowcmd_enabled={enable_lowcmd}, lowcmd_topic={lowcmd_topic}, "
+            f"secondary_imu_enabled={enable_secondary_imu}, secondary_imu_topic={secondary_imu_topic}, "
             f"network_interface={interface}, udp_host={bind_host}, "
-            f"lowstate_port={lowstate_port}, lowcmd_port={lowcmd_port})",
+            f"lowstate_port={lowstate_port}, secondary_imu_port={secondary_imu_port}, lowcmd_port={lowcmd_port})",
             file=sys.stderr,
             flush=True,
         )
@@ -101,14 +130,26 @@ class UnitreeSdk2PySidecar:
             try:
                 packet, _addr = self._recv_socket.recvfrom(65535)
             except BlockingIOError:
-                return
+                break
             self._publish_lowstate(packet)
+        if self._secondary_imu_recv_socket is None:
+            return
+        while True:
+            try:
+                packet, _addr = self._secondary_imu_recv_socket.recvfrom(65535)
+            except BlockingIOError:
+                return
+            self._publish_secondary_imu(packet)
 
     def shutdown(self) -> None:
         if self._recv_socket is not None:
             self._recv_socket.close()
         if self._lowstate_publisher is not None:
             self._lowstate_publisher.Close()
+        if self._secondary_imu_recv_socket is not None:
+            self._secondary_imu_recv_socket.close()
+        if self._secondary_imu_publisher is not None:
+            self._secondary_imu_publisher.Close()
         if self._lowcmd_subscriber is not None:
             self._lowcmd_subscriber.Close()
         if self._lowcmd_send_socket is not None:
@@ -120,6 +161,13 @@ class UnitreeSdk2PySidecar:
         payload = decode_native_lowstate_packet(packet)
         message = build_lowstate_message(payload, self._lowstate_factory, self._crc)
         self._lowstate_publisher.Write(message)
+
+    def _publish_secondary_imu(self, packet: bytes) -> None:
+        if self._secondary_imu_publisher is None:
+            return
+        payload = decode_native_secondary_imu_packet(packet)
+        message = build_secondary_imu_message(payload, self._imu_state_type)
+        self._secondary_imu_publisher.Write(message)
 
     def _on_lowcmd(self, message) -> None:
         if self._lowcmd_send_socket is None:
@@ -142,7 +190,7 @@ def build_lowstate_message(payload, lowstate_factory, crc):
     message.imu_state.quaternion = _fixed_float_list(payload.get("imu_quaternion_wxyz"), 4)
     message.imu_state.gyroscope = _fixed_float_list(payload.get("imu_gyroscope_body"), 3)
     message.imu_state.accelerometer = _fixed_float_list(payload.get("imu_accelerometer_body"), 3)
-    message.imu_state.rpy = [0.0, 0.0, 0.0]
+    message.imu_state.rpy = _fixed_float_list(payload.get("imu_rpy"), 3)
     message.imu_state.temperature = 0
 
     positions = _fixed_float_list(payload.get("joint_positions_dds"), BODY_JOINT_COUNT)
@@ -177,6 +225,17 @@ def build_lowstate_message(payload, lowstate_factory, crc):
     message.reserve = [0, 0, 0, 0]
     message.crc = 0
     message.crc = crc.Crc(message)
+    return message
+
+
+def build_secondary_imu_message(payload, imu_state_type):
+    """Build a Unitree HG IMUState_ message from a decoded simulator packet."""
+    message = imu_state_type()
+    message.quaternion = _fixed_float_list(payload.get("quaternion_wxyz"), 4)
+    message.gyroscope = _fixed_float_list(payload.get("gyroscope_body"), 3)
+    message.accelerometer = _fixed_float_list(payload.get("accelerometer_body"), 3)
+    message.rpy = _fixed_float_list(payload.get("rpy"), 3)
+    message.temperature = 0
     return message
 
 
@@ -225,9 +284,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--network-interface", default="lo")
     parser.add_argument("--bind-host", default="127.0.0.1")
     parser.add_argument("--lowstate-port", type=int, required=True)
+    parser.add_argument("--secondary-imu-topic", default="rt/secondary_imu")
+    parser.add_argument("--secondary-imu-port", type=int, required=True)
     parser.add_argument("--lowcmd-port", type=int, required=True)
     parser.add_argument("--enable-lowstate", action="store_true")
     parser.add_argument("--enable-lowcmd", action="store_true")
+    parser.add_argument("--enable-secondary-imu", action="store_true")
     return parser
 
 
@@ -243,6 +305,9 @@ def main(argv: list[str] | None = None) -> int:
         lowcmd_port=args.lowcmd_port,
         enable_lowstate=args.enable_lowstate,
         enable_lowcmd=args.enable_lowcmd,
+        enable_secondary_imu=args.enable_secondary_imu,
+        secondary_imu_topic=args.secondary_imu_topic,
+        secondary_imu_port=args.secondary_imu_port,
     )
     try:
         while True:

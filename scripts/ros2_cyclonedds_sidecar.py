@@ -16,9 +16,9 @@ if str(SRC_ROOT) not in sys.path:
 
 import rclpy
 from rclpy.node import Node
-from unitree_hg.msg import LowCmd, LowState
+from unitree_hg.msg import IMUState, LowCmd, LowState
 
-from dds.ros2.bridge_protocol import decode_lowstate_packet, encode_lowcmd_packet
+from dds.ros2.bridge_protocol import decode_lowstate_packet, decode_secondary_imu_packet, encode_lowcmd_packet
 
 
 BODY_JOINT_COUNT = 29
@@ -32,14 +32,20 @@ class Ros2CycloneDdsSidecar(Node):
         self,
         *,
         lowstate_topic: str,
+        secondary_imu_topic: str,
         lowcmd_topic: str,
         bind_host: str,
         lowstate_port: int,
+        secondary_imu_port: int,
         lowcmd_port: int,
         enable_lowcmd: bool,
+        enable_secondary_imu: bool,
     ) -> None:
         super().__init__("unitree_g1_ros2_sidecar", enable_rosout=False)
         self._lowstate_publisher = self.create_publisher(LowState, lowstate_topic, 10)
+        self._secondary_imu_publisher = (
+            self.create_publisher(IMUState, secondary_imu_topic, 10) if enable_secondary_imu else None
+        )
         self._lowcmd_subscription = (
             self.create_subscription(LowCmd, lowcmd_topic, self._on_lowcmd, 32)
             if enable_lowcmd
@@ -50,6 +56,12 @@ class Ros2CycloneDdsSidecar(Node):
         self._recv_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._recv_socket.bind((bind_host, lowstate_port))
         self._recv_socket.setblocking(False)
+        self._secondary_imu_recv_socket = None
+        if enable_secondary_imu:
+            self._secondary_imu_recv_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self._secondary_imu_recv_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self._secondary_imu_recv_socket.bind((bind_host, secondary_imu_port))
+            self._secondary_imu_recv_socket.setblocking(False)
 
         self._send_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) if enable_lowcmd else None
         self._send_target = (bind_host, lowcmd_port)
@@ -59,11 +71,21 @@ class Ros2CycloneDdsSidecar(Node):
             try:
                 packet, _addr = self._recv_socket.recvfrom(65535)
             except BlockingIOError:
-                return
+                break
             self._publish_lowstate(packet)
+        if self._secondary_imu_recv_socket is None:
+            return
+        while True:
+            try:
+                packet, _addr = self._secondary_imu_recv_socket.recvfrom(65535)
+            except BlockingIOError:
+                return
+            self._publish_secondary_imu(packet)
 
     def shutdown(self) -> None:
         self._recv_socket.close()
+        if self._secondary_imu_recv_socket is not None:
+            self._secondary_imu_recv_socket.close()
         if self._send_socket is not None:
             self._send_socket.close()
 
@@ -75,6 +97,7 @@ class Ros2CycloneDdsSidecar(Node):
         message.imu_state.quaternion = payload.get("imu_quaternion_wxyz", [1.0, 0.0, 0.0, 0.0])
         message.imu_state.accelerometer = payload.get("imu_accelerometer", [0.0, 0.0, 0.0])
         message.imu_state.gyroscope = payload.get("imu_gyroscope", [0.0, 0.0, 0.0])
+        message.imu_state.rpy = payload.get("imu_rpy", [0.0, 0.0, 0.0])
 
         positions = payload.get("joint_positions", [])
         velocities = payload.get("joint_velocities", [])
@@ -87,6 +110,18 @@ class Ros2CycloneDdsSidecar(Node):
 
         message.crc = 0
         self._lowstate_publisher.publish(message)
+
+    def _publish_secondary_imu(self, packet: bytes) -> None:
+        if self._secondary_imu_publisher is None:
+            return
+        payload = decode_secondary_imu_packet(packet)
+        message = IMUState()
+        message.quaternion = payload.get("quaternion_wxyz", [1.0, 0.0, 0.0, 0.0])
+        message.accelerometer = payload.get("accelerometer", [0.0, 0.0, 0.0])
+        message.gyroscope = payload.get("gyroscope", [0.0, 0.0, 0.0])
+        message.rpy = payload.get("rpy", [0.0, 0.0, 0.0])
+        message.temperature = 0
+        self._secondary_imu_publisher.publish(message)
 
     def _on_lowcmd(self, message: LowCmd) -> None:
         if self._send_socket is None:
@@ -107,10 +142,13 @@ class Ros2CycloneDdsSidecar(Node):
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run the ROS 2 / CycloneDDS sidecar bridge.")
     parser.add_argument("--lowstate-topic", default="rt/lowstate")
+    parser.add_argument("--secondary-imu-topic", default="rt/secondary_imu")
     parser.add_argument("--lowcmd-topic", default="rt/lowcmd")
     parser.add_argument("--bind-host", default="127.0.0.1")
     parser.add_argument("--lowstate-port", type=int, required=True)
+    parser.add_argument("--secondary-imu-port", type=int, required=True)
     parser.add_argument("--lowcmd-port", type=int, required=True)
+    parser.add_argument("--enable-secondary-imu", action="store_true")
     parser.add_argument(
         "--enable-lowcmd",
         action="store_true",
@@ -124,11 +162,14 @@ def main(argv: list[str] | None = None) -> int:
     rclpy.init(args=None)
     node = Ros2CycloneDdsSidecar(
         lowstate_topic=args.lowstate_topic,
+        secondary_imu_topic=args.secondary_imu_topic,
         lowcmd_topic=args.lowcmd_topic,
         bind_host=args.bind_host,
         lowstate_port=args.lowstate_port,
+        secondary_imu_port=args.secondary_imu_port,
         lowcmd_port=args.lowcmd_port,
         enable_lowcmd=args.enable_lowcmd,
+        enable_secondary_imu=args.enable_secondary_imu,
     )
     exit_code = 0
     try:
