@@ -11,6 +11,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from config import AppConfig
+from dds.common.lowcmd_types import LowCmdCache
 from dds.sdk2py.manager import SDK2PY_UDP_LOWSTATE_PORT, UnitreeSdk2PyDdsManager
 
 
@@ -30,6 +31,46 @@ class _FakeSdk2PyLowStatePublisher:
 
     def close(self):
         self.close_calls += 1
+
+
+class _FakeSdk2PyLowCmdSubscriber:
+    def __init__(self, command=None):
+        self.latest_command = command
+        self.initialize_calls = 0
+        self.poll_calls = 0
+        self.clear_calls = 0
+        self.close_calls = 0
+
+    @property
+    def bound_port(self):
+        return 45679
+
+    def initialize(self):
+        self.initialize_calls += 1
+        return True
+
+    def poll(self):
+        self.poll_calls += 1
+
+    def clear_cached_command(self):
+        self.clear_calls += 1
+        self.latest_command = None
+
+    def close(self):
+        self.close_calls += 1
+
+
+def _lowcmd(received_at=100.0):
+    return LowCmdCache(
+        mode_pr=0,
+        mode_machine=0,
+        joint_positions_dds=tuple(0.0 for _ in range(29)),
+        joint_velocities_dds=tuple(0.0 for _ in range(29)),
+        joint_torques_dds=tuple(0.0 for _ in range(29)),
+        joint_kp_dds=tuple(0.0 for _ in range(29)),
+        joint_kd_dds=tuple(0.0 for _ in range(29)),
+        received_at_monotonic=received_at,
+    )
 
 
 def _build_config(**overrides) -> AppConfig:
@@ -90,6 +131,7 @@ class UnitreeSdk2PyDdsManagerTests(unittest.TestCase):
             )
         )
         manager._lowstate_publisher = _FakeSdk2PyLowStatePublisher()
+        manager._lowcmd_subscriber = _FakeSdk2PyLowCmdSubscriber()
 
         with patch.object(manager, "_cleanup_stale_sidecars"):
             with patch("dds.sdk2py.manager.subprocess.Popen") as popen_mock:
@@ -108,27 +150,41 @@ class UnitreeSdk2PyDdsManagerTests(unittest.TestCase):
         self.assertIn("eth0", command)
         self.assertIn("--lowstate-port", command)
         self.assertIn(str(SDK2PY_UDP_LOWSTATE_PORT), command)
+        self.assertIn("--enable-lowstate", command)
+        self.assertIn("--enable-lowcmd", command)
+        self.assertIn("--lowcmd-topic", command)
+        self.assertIn("rt/lowcmd", command)
+        self.assertIn("--lowcmd-port", command)
+        self.assertIn("45679", command)
         self.assertEqual(manager._lowstate_publisher.initialize_calls, 1)
+        self.assertEqual(manager._lowcmd_subscriber.initialize_calls, 1)
 
-    def test_initialize_does_not_start_sidecar_when_only_phase2_lowcmd_is_selected(self):
+    def test_initialize_starts_sidecar_when_only_lowcmd_is_selected(self):
         manager = UnitreeSdk2PyDdsManager(
             _build_config(
                 enable_unitree_sdk2py_lowstate=False,
                 enable_unitree_sdk2py_lowcmd=True,
             )
         )
+        manager._lowcmd_subscriber = _FakeSdk2PyLowCmdSubscriber()
 
-        with patch("dds.sdk2py.manager.subprocess.Popen") as popen_mock:
-            initialized = manager.initialize()
+        with patch.object(manager, "_cleanup_stale_sidecars"):
+            with patch("dds.sdk2py.manager.subprocess.Popen") as popen_mock:
+                popen_mock.return_value.pid = 12345
+                initialized = manager.initialize()
 
-        self.assertFalse(initialized)
-        popen_mock.assert_not_called()
+        self.assertTrue(initialized)
+        command = popen_mock.call_args.args[0]
+        self.assertNotIn("--enable-lowstate", command)
+        self.assertIn("--enable-lowcmd", command)
+        self.assertEqual(manager._lowcmd_subscriber.initialize_calls, 1)
 
     def test_lowstate_schedule_does_not_reanchor_to_current_frame(self):
         manager = UnitreeSdk2PyDdsManager(_build_config())
         manager._initialized = True
         manager._sdk_enabled = True
         manager._lowstate_publisher = _FakeSdk2PyLowStatePublisher()
+        manager._lowcmd_subscriber = _FakeSdk2PyLowCmdSubscriber()
 
         snapshot = object()
         published_frames = []
@@ -146,7 +202,9 @@ class UnitreeSdk2PyDdsManagerTests(unittest.TestCase):
 
     def test_reset_runtime_state_clears_sdk2py_cadence_state(self):
         manager = UnitreeSdk2PyDdsManager(_build_config())
+        manager._lowcmd_subscriber = _FakeSdk2PyLowCmdSubscriber(command=_lowcmd())
         manager._next_lowstate_publish_time = 12.5
+        manager._warned_stale_lowcmd = True
         manager._simulation_cadence.window_start_time = 5.0
         manager._simulation_cadence.publish_count = 10
         manager._wall_clock_cadence.window_start_time = 6.0
@@ -155,6 +213,9 @@ class UnitreeSdk2PyDdsManagerTests(unittest.TestCase):
         manager.reset_runtime_state()
 
         self.assertEqual(manager._next_lowstate_publish_time, 0.0)
+        self.assertFalse(manager._warned_stale_lowcmd)
+        self.assertIsNone(manager._lowcmd_subscriber.latest_command)
+        self.assertEqual(manager._lowcmd_subscriber.clear_calls, 1)
         self.assertIsNone(manager._simulation_cadence.window_start_time)
         self.assertEqual(manager._simulation_cadence.publish_count, 0)
         self.assertIsNone(manager._wall_clock_cadence.window_start_time)
@@ -200,6 +261,38 @@ class UnitreeSdk2PyDdsManagerTests(unittest.TestCase):
             self.assertEqual(env["PYTHONPATH"], str(Path.home() / "unitree_sdk2_python"))
         else:
             self.assertNotIn("PYTHONPATH", env)
+
+    def test_resolve_latest_lowcmd_returns_fresh_sdk2py_command(self):
+        command = _lowcmd(received_at=10.0)
+        manager = UnitreeSdk2PyDdsManager(_build_config(lowcmd_timeout_seconds=0.5))
+        manager._lowcmd_subscriber = _FakeSdk2PyLowCmdSubscriber(command=command)
+
+        resolved = manager._resolve_latest_lowcmd(now_monotonic=10.25)
+
+        self.assertIs(resolved, command)
+
+    def test_resolve_latest_lowcmd_drops_stale_sdk2py_command(self):
+        command = _lowcmd(received_at=10.0)
+        manager = UnitreeSdk2PyDdsManager(_build_config(lowcmd_timeout_seconds=0.5))
+        manager._lowcmd_subscriber = _FakeSdk2PyLowCmdSubscriber(command=command)
+
+        resolved = manager._resolve_latest_lowcmd(now_monotonic=11.0)
+
+        self.assertIsNone(resolved)
+
+    def test_step_polls_sdk2py_lowcmd_when_enabled(self):
+        command = _lowcmd(received_at=10.0)
+        manager = UnitreeSdk2PyDdsManager(_build_config(lowcmd_timeout_seconds=0.0))
+        manager._initialized = True
+        manager._sdk_enabled = True
+        manager._lowstate_publisher = _FakeSdk2PyLowStatePublisher()
+        manager._lowcmd_subscriber = _FakeSdk2PyLowCmdSubscriber(command=command)
+
+        result = manager.step(1.0 / 120.0, object())
+
+        self.assertEqual(manager._lowcmd_subscriber.poll_calls, 1)
+        self.assertTrue(result.lowcmd_available)
+        self.assertTrue(result.lowcmd_fresh)
 
 
 if __name__ == "__main__":

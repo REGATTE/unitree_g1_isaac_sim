@@ -23,7 +23,7 @@ The current default command-authority mode is:
 
 - ROS 2 lowstate enabled: simulator publishes `/rt/lowstate`
 - SDK2 Python lowstate enabled: simulator publishes SDK `rt/lowstate`
-- SDK2 Python lowcmd selected: SDK2 Python `rt/lowcmd` support lands in Phase 2
+- SDK2 Python lowcmd enabled: SDK2 Python `rt/lowcmd` drives the simulator
 - native C++ Unitree SDK runtime disabled unless explicitly enabled
 - ROS 2 lowcmd disabled: `/rt/lowcmd` is not the active command source
 
@@ -32,7 +32,6 @@ The intended external flow is:
 - ROS 2 state out: Isaac Sim -> ROS 2 sidecar -> `/rt/lowstate`
 - SDK2 Python state out: Isaac Sim -> SDK2 Python sidecar -> `rt/lowstate`
 - SDK2 Python command ingress: `rt/lowcmd` -> SDK2 Python sidecar -> Isaac Sim
-  after Phase 2
 - native C++ SDK state/command path is still available as an alternate runtime
   mode, but it is mutually exclusive with SDK2 Python
 - simulated LiDAR out: Isaac RTX LiDAR -> Isaac ROS 2 bridge -> ROS 2 apps
@@ -61,7 +60,7 @@ The intended external flow is:
 |                              | |                              | |                              |
 | - LowState publisher         | | - LowState_ publisher        | | - LowState_ publisher        |
 | - LowCmd subscriber only     | | - LowCmd_ subscriber         | | - LowCmd_ subscriber         |
-|   when explicitly enabled    | |   after Phase 2              | |                              |
+|   when explicitly enabled    | |                              | |                              |
 | - rclpy + CycloneDDS         | | - unitree_sdk2py + DDS       | | - unitree_sdk2 + DDS         |
 | - UDP: 127.0.0.1:35501/35502 | | - UDP: 127.0.0.1:35521       | | - UDP: 127.0.0.1:35511/35512 |
 +---------------+--------------+ +---------------+--------------+ +---------------+--------------+
@@ -71,7 +70,7 @@ The intended external flow is:
 | ROS 2 / CycloneDDS           | | Unitree SDK DDS              | | Unitree SDK DDS              |
 |                              | |                              | |                              |
 | - /rt/lowstate               | | - rt/lowstate                | | - rt/lowstate                |
-| - /rt/lowcmd opt-in only     | | - rt/lowcmd after Phase 2    | | - rt/lowcmd                  |
+| - /rt/lowcmd opt-in only     | | - rt/lowcmd                  | | - rt/lowcmd                  |
 +---------------+--------------+ +---------------+--------------+ +---------------+--------------+
                 |                                |                                |
                 v                                v                                v

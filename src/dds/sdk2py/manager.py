@@ -15,14 +15,16 @@ from robot_state import RobotKinematicSnapshot
 from runtime_logging import get_logger
 
 from dds.common.lowcmd_types import LowCmdCache
-from dds.common.timing import CadenceTracker, compute_publish_period
+from dds.common.timing import CadenceTracker, compute_publish_period, is_fresh
 
+from .lowcmd import Sdk2PyLowCmdUdpSubscriber
 from .lowstate import Sdk2PyLowStateUdpPublisher
 
 
 LOGGER = get_logger("dds.sdk2py_manager")
 
 SDK2PY_UDP_LOWSTATE_PORT = 35521
+SDK2PY_UDP_LOWCMD_PORT = 35522
 
 
 @dataclass(frozen=True)
@@ -54,13 +56,19 @@ class UnitreeSdk2PyDdsManager:
             host=config.bridge_bind_host,
             port=SDK2PY_UDP_LOWSTATE_PORT,
         )
+        self._lowcmd_subscriber = Sdk2PyLowCmdUdpSubscriber(
+            bind_host=config.bridge_bind_host,
+            bind_port=SDK2PY_UDP_LOWCMD_PORT,
+        )
         self._simulation_cadence = CadenceTracker(label="sdk2py_simulation_time")
         self._wall_clock_cadence = CadenceTracker(label="sdk2py_wall_clock")
+        self._warned_stale_lowcmd = False
 
     @property
     def latest_lowcmd(self) -> LowCmdCache | None:
-        """SDK2 Python lowcmd ingress lands in Phase 2."""
-        return None
+        if not self._config.enable_unitree_sdk2py_lowcmd:
+            return None
+        return self._resolve_latest_lowcmd(now_monotonic=time.monotonic())
 
     def initialize(self) -> bool:
         """Initialize the SDK2 Python sidecar bridge."""
@@ -74,18 +82,20 @@ class UnitreeSdk2PyDdsManager:
 
         try:
             if self._config.enable_unitree_sdk2py_lowcmd:
-                LOGGER.info("Unitree SDK2 Python lowcmd ingress is reserved for Phase 2")
+                self._lowcmd_subscriber.initialize()
+            else:
+                LOGGER.info("Unitree SDK2 Python lowcmd subscriber disabled for this run")
             if self._config.enable_unitree_sdk2py_lowstate:
-                self._start_bridge()
                 self._lowstate_publisher.initialize()
             else:
                 LOGGER.info("Unitree SDK2 Python lowstate publisher disabled for this run")
-                return False
+            self._start_bridge()
             self._sdk_enabled = True
             LOGGER.info(
-                "initialized Unitree SDK2 Python bridge (domain_id=%s lowstate_topic=%s)",
+                "initialized Unitree SDK2 Python bridge (domain_id=%s lowstate_topic=%s lowcmd_topic=%s)",
                 self._config.unitree_sdk2py_domain_id,
                 self._config.unitree_sdk2py_lowstate_topic,
+                self._config.unitree_sdk2py_lowcmd_topic,
             )
             return True
         except Exception:
@@ -97,6 +107,8 @@ class UnitreeSdk2PyDdsManager:
 
         if self._sdk_enabled:
             self._poll_bridge_health()
+            if self._config.enable_unitree_sdk2py_lowcmd:
+                self._lowcmd_subscriber.poll()
 
         lowstate_published = False
         if (
@@ -121,13 +133,21 @@ class UnitreeSdk2PyDdsManager:
                     warn_ratio=self._config.lowstate_cadence_warn_ratio,
                 )
 
+        active_lowcmd = self._resolve_latest_lowcmd(now_monotonic=time.monotonic())
+
         return Sdk2PyDdsStepResult(
             lowstate_published=lowstate_published,
-            lowcmd_available=False,
-            lowcmd_fresh=False,
+            lowcmd_available=(
+                self._config.enable_unitree_sdk2py_lowcmd
+                and self._lowcmd_subscriber.latest_command is not None
+            ),
+            lowcmd_fresh=active_lowcmd is not None,
         )
 
     def reset_runtime_state(self) -> None:
+        if hasattr(self._lowcmd_subscriber, "clear_cached_command"):
+            self._lowcmd_subscriber.clear_cached_command()
+        self._warned_stale_lowcmd = False
         self._next_lowstate_publish_time = 0.0
         self._simulation_cadence = CadenceTracker(label="sdk2py_simulation_time")
         self._wall_clock_cadence = CadenceTracker(label="sdk2py_wall_clock")
@@ -143,12 +163,18 @@ class UnitreeSdk2PyDdsManager:
                 self._bridge_process.wait(timeout=5.0)
         self._bridge_process = None
         self._lowstate_publisher.close()
+        self._lowcmd_subscriber.close()
         self._lowstate_publisher = Sdk2PyLowStateUdpPublisher(
             host=self._config.bridge_bind_host,
             port=SDK2PY_UDP_LOWSTATE_PORT,
         )
+        self._lowcmd_subscriber = Sdk2PyLowCmdUdpSubscriber(
+            bind_host=self._config.bridge_bind_host,
+            bind_port=SDK2PY_UDP_LOWCMD_PORT,
+        )
         self._sdk_enabled = False
         self._initialized = False
+        self._warned_stale_lowcmd = False
         self._next_lowstate_publish_time = 0.0
         self._simulation_cadence = CadenceTracker(label="sdk2py_simulation_time")
         self._wall_clock_cadence = CadenceTracker(label="sdk2py_wall_clock")
@@ -172,6 +198,18 @@ class UnitreeSdk2PyDdsManager:
             "--lowstate-port",
             str(SDK2PY_UDP_LOWSTATE_PORT),
         ]
+        if self._config.enable_unitree_sdk2py_lowstate:
+            command.append("--enable-lowstate")
+        if self._config.enable_unitree_sdk2py_lowcmd:
+            command.extend(
+                [
+                    "--enable-lowcmd",
+                    "--lowcmd-topic",
+                    self._config.unitree_sdk2py_lowcmd_topic,
+                    "--lowcmd-port",
+                    str(self._lowcmd_subscriber.bound_port),
+                ]
+            )
         self._bridge_process = subprocess.Popen(
             command,
             cwd=Path(__file__).resolve().parents[3],
@@ -276,3 +314,31 @@ class UnitreeSdk2PyDdsManager:
     def _advance_lowstate_publish_schedule(self, simulation_time_seconds: float) -> None:
         while self._next_lowstate_publish_time <= simulation_time_seconds:
             self._next_lowstate_publish_time += self._lowstate_publish_period
+
+    def _resolve_latest_lowcmd(self, now_monotonic: float) -> LowCmdCache | None:
+        if not self._config.enable_unitree_sdk2py_lowcmd:
+            self._warned_stale_lowcmd = False
+            return None
+        cached = self._lowcmd_subscriber.latest_command
+        fresh = is_fresh(now_monotonic, cached, self._config.lowcmd_timeout_seconds)
+        if not fresh:
+            if cached is None:
+                self._warned_stale_lowcmd = False
+                return None
+            if not self._warned_stale_lowcmd:
+                age_seconds = now_monotonic - cached.received_at_monotonic
+                LOGGER.warning(
+                    "cached SDK2 Python `rt/lowcmd` sample went stale after %.3fs; stopping command "
+                    "reapplication until a fresh sample arrives.",
+                    age_seconds,
+                )
+                self._warned_stale_lowcmd = True
+            return None
+
+        if cached is None:
+            self._warned_stale_lowcmd = False
+            return None
+        if self._warned_stale_lowcmd:
+            LOGGER.info("received fresh SDK2 Python `rt/lowcmd` again; resuming command application.")
+        self._warned_stale_lowcmd = False
+        return cached

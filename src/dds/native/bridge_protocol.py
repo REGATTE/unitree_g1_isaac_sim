@@ -39,3 +39,26 @@ def decode_native_lowstate_packet(packet: bytes) -> dict[str, Any]:
 def decode_native_lowcmd_packet(packet: bytes) -> dict[str, Any]:
     """Parse a native lowcmd localhost packet."""
     return json.loads(packet.decode("utf-8"))
+
+
+def encode_native_lowcmd_packet(
+    *,
+    mode_pr: int,
+    mode_machine: int,
+    joint_positions_dds: list[float],
+    joint_velocities_dds: list[float],
+    joint_torques_dds: list[float],
+    joint_kp_dds: list[float],
+    joint_kd_dds: list[float],
+) -> bytes:
+    """Serialize a lowcmd packet for a Unitree SDK sidecar."""
+    payload = {
+        "mode_pr": int(mode_pr),
+        "mode_machine": int(mode_machine),
+        "joint_positions_dds": [float(value) for value in joint_positions_dds],
+        "joint_velocities_dds": [float(value) for value in joint_velocities_dds],
+        "joint_torques_dds": [float(value) for value in joint_torques_dds],
+        "joint_kp_dds": [float(value) for value in joint_kp_dds],
+        "joint_kd_dds": [float(value) for value in joint_kd_dds],
+    }
+    return json.dumps(payload, separators=(",", ":")).encode("utf-8")
