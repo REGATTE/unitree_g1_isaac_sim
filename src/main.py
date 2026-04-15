@@ -8,6 +8,7 @@ validates that robot state can be read, and then owns the main loop.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import logging
 
 from config import PROJECT_ROOT, AppConfig, parse_config
@@ -29,6 +30,80 @@ from tooling.sim_clock import IsaacSimClockPublisher, setup_sim_clock
 from viewpoints import FollowCameraController
 
 LOGGER = get_logger("main")
+
+
+@dataclass(frozen=True)
+class DdsRuntimeMode:
+    """Resolved DDS runtime shape for one simulator launch."""
+
+    ros2_dds_enabled: bool
+    native_unitree_enabled: bool
+    sdk2py_enabled: bool
+    lowcmd_authority: str
+
+
+@dataclass(frozen=True)
+class DdsRuntimeManagers:
+    """Manager instances selected for one simulator launch."""
+
+    ros2: DdsManager | None
+    native_unitree: NativeUnitreeDdsManager | None
+    sdk2py: UnitreeSdk2PyDdsManager | None
+
+
+def resolve_dds_runtime_mode(config: AppConfig) -> DdsRuntimeMode:
+    """Resolve which DDS runtimes should be active for this launch."""
+    ros2_dds_enabled = config.enable_dds and (
+        config.enable_ros2_lowstate or config.enable_ros2_lowcmd
+    )
+    sdk2py_enabled = config.enable_unitree_sdk2py_lowstate or config.enable_unitree_sdk2py_lowcmd
+    native_requested = config.enable_native_unitree_lowstate or config.enable_native_unitree_lowcmd
+    native_unitree_enabled = native_requested and not sdk2py_enabled
+
+    lowcmd_sources = [
+        ("sdk2py", config.enable_unitree_sdk2py_lowcmd),
+        ("native", config.enable_native_unitree_lowcmd and native_unitree_enabled),
+        ("ros2", config.enable_ros2_lowcmd),
+    ]
+    active_lowcmd_sources = [name for name, enabled in lowcmd_sources if enabled]
+    lowcmd_authority = active_lowcmd_sources[0] if active_lowcmd_sources else "none"
+
+    return DdsRuntimeMode(
+        ros2_dds_enabled=ros2_dds_enabled,
+        native_unitree_enabled=native_unitree_enabled,
+        sdk2py_enabled=sdk2py_enabled,
+        lowcmd_authority=lowcmd_authority,
+    )
+
+
+def log_dds_runtime_mode(config: AppConfig, mode: DdsRuntimeMode) -> None:
+    """Emit the resolved runtime mode once during startup."""
+    unitree_runtime = "sdk2py" if mode.sdk2py_enabled else "native" if mode.native_unitree_enabled else "none"
+    LOGGER.info(
+        "DDS runtime mode: ros2=%s ros2_lowstate=%s ros2_lowcmd=%s "
+        "unitree_runtime=%s sdk2py_lowstate=%s sdk2py_lowcmd=%s "
+        "native_lowstate=%s native_lowcmd=%s lowcmd_authority=%s",
+        "enabled" if mode.ros2_dds_enabled else "disabled",
+        "enabled" if config.enable_ros2_lowstate else "disabled",
+        "enabled" if config.enable_ros2_lowcmd else "disabled",
+        unitree_runtime,
+        "enabled" if config.enable_unitree_sdk2py_lowstate else "disabled",
+        "enabled" if config.enable_unitree_sdk2py_lowcmd else "disabled",
+        "enabled" if mode.native_unitree_enabled and config.enable_native_unitree_lowstate else "disabled",
+        "enabled" if mode.native_unitree_enabled and config.enable_native_unitree_lowcmd else "disabled",
+        mode.lowcmd_authority,
+    )
+    if mode.sdk2py_enabled and (config.enable_native_unitree_lowstate or config.enable_native_unitree_lowcmd):
+        LOGGER.warning("native Unitree SDK runtime suppressed because SDK2 Python runtime is active")
+
+
+def create_dds_runtime_managers(config: AppConfig, mode: DdsRuntimeMode) -> DdsRuntimeManagers:
+    """Create only the DDS managers selected by the resolved runtime mode."""
+    return DdsRuntimeManagers(
+        ros2=DdsManager(config) if mode.ros2_dds_enabled else None,
+        native_unitree=NativeUnitreeDdsManager(config) if mode.native_unitree_enabled else None,
+        sdk2py=UnitreeSdk2PyDdsManager(config) if mode.sdk2py_enabled else None,
+    )
 
 
 def resolve_active_lowcmd(
@@ -228,14 +303,12 @@ def main() -> int:
                 camera_controller.update(state_reader.read_kinematic_snapshot(sample_dt=config.physics_dt))
             except PhysicsViewUnavailableError:
                 LOGGER.warning("initial follow camera update skipped because robot physics view is unavailable")
-        ros2_dds_enabled = config.enable_dds and (
-            config.enable_ros2_lowstate or config.enable_ros2_lowcmd
-        )
-        dds_manager = DdsManager(config) if ros2_dds_enabled else None
-        native_dds_enabled = config.enable_native_unitree_lowstate or config.enable_native_unitree_lowcmd
-        native_dds_manager = NativeUnitreeDdsManager(config) if native_dds_enabled else None
-        sdk2py_dds_enabled = config.enable_unitree_sdk2py_lowstate or config.enable_unitree_sdk2py_lowcmd
-        sdk2py_dds_manager = UnitreeSdk2PyDdsManager(config) if sdk2py_dds_enabled else None
+        runtime_mode = resolve_dds_runtime_mode(config)
+        log_dds_runtime_mode(config, runtime_mode)
+        runtime_managers = create_dds_runtime_managers(config, runtime_mode)
+        dds_manager = runtime_managers.ros2
+        native_dds_manager = runtime_managers.native_unitree
+        sdk2py_dds_manager = runtime_managers.sdk2py
         command_applier = (
             RobotCommandApplier(
                 state_reader,
