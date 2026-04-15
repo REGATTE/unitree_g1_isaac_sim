@@ -191,6 +191,7 @@ class UnitreeSdk2PyDdsManagerTests(unittest.TestCase):
                 enable_unitree_sdk2py_lowcmd=True,
             )
         )
+        manager._secondary_imu_publisher = _FakeSdk2PySecondaryImuPublisher()
         manager._lowcmd_subscriber = _FakeSdk2PyLowCmdSubscriber()
 
         with patch.object(manager, "_cleanup_stale_sidecars"):
@@ -321,6 +322,22 @@ class UnitreeSdk2PyDdsManagerTests(unittest.TestCase):
         self.assertEqual(manager._lowcmd_subscriber.poll_calls, 1)
         self.assertTrue(result.lowcmd_available)
         self.assertTrue(result.lowcmd_fresh)
+
+    def test_secondary_imu_still_publishes_when_sdk2py_lowstate_is_disabled(self):
+        manager = UnitreeSdk2PyDdsManager(
+            _build_config(enable_unitree_sdk2py_lowstate=False, enable_unitree_sdk2py_lowcmd=True)
+        )
+        manager._initialized = True
+        manager._sdk_enabled = True
+        manager._lowstate_publisher = _FakeSdk2PyLowStatePublisher()
+        manager._secondary_imu_publisher = _FakeSdk2PySecondaryImuPublisher()
+        manager._lowcmd_subscriber = _FakeSdk2PyLowCmdSubscriber(command=_lowcmd())
+
+        result = manager.step(1.0 / 120.0, object())
+
+        self.assertFalse(result.lowstate_published)
+        self.assertEqual(manager._lowstate_publisher.publish_calls, 0)
+        self.assertEqual(manager._secondary_imu_publisher.publish_calls, 1)
 
 
 if __name__ == "__main__":

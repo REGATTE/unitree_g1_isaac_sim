@@ -230,13 +230,22 @@ def build_lowstate_message(payload, lowstate_factory, crc):
 
 def build_secondary_imu_message(payload, imu_state_type):
     """Build a Unitree HG IMUState_ message from a decoded simulator packet."""
-    message = imu_state_type()
-    message.quaternion = _fixed_float_list(payload.get("quaternion_wxyz"), 4)
-    message.gyroscope = _fixed_float_list(payload.get("gyroscope_body"), 3)
-    message.accelerometer = _fixed_float_list(payload.get("accelerometer_body"), 3)
-    message.rpy = _fixed_float_list(payload.get("rpy"), 3)
-    message.temperature = 0
-    return message
+    quaternion = _fixed_float_list(payload.get("quaternion_wxyz"), 4)
+    gyroscope = _fixed_float_list(payload.get("gyroscope_body"), 3)
+    accelerometer = _fixed_float_list(payload.get("accelerometer_body"), 3)
+    rpy = _fixed_float_list(payload.get("rpy"), 3)
+    temperature = 0
+    try:
+        return imu_state_type(quaternion, gyroscope, accelerometer, rpy, temperature)
+    except TypeError:
+        # Test doubles may allow default construction plus attribute writes.
+        message = imu_state_type()
+        message.quaternion = quaternion
+        message.gyroscope = gyroscope
+        message.accelerometer = accelerometer
+        message.rpy = rpy
+        message.temperature = temperature
+        return message
 
 
 def has_valid_or_unset_crc(message, crc) -> bool:

@@ -335,6 +335,20 @@ class DdsManagerTests(unittest.TestCase):
         self.assertIn("--enable-secondary-imu", command)
         self.assertIn("--enable-lowcmd", command)
 
+    def test_secondary_imu_still_publishes_when_ros2_lowstate_is_disabled(self):
+        manager = DdsManager(_build_config(enable_ros2_lowstate=False, enable_ros2_lowcmd=True))
+        manager._initialized = True
+        manager._sdk_enabled = True
+        manager._lowstate_publisher = _FakeLowStatePublisher()
+        manager._secondary_imu_publisher = _FakeSecondaryImuPublisher()
+        manager._lowcmd_subscriber = _FakeLowCmdSubscriber()
+
+        result = manager.step(1.0 / 120.0, object())
+
+        self.assertFalse(result.lowstate_published)
+        self.assertEqual(manager._lowstate_publisher.publish_calls, 0)
+        self.assertEqual(manager._secondary_imu_publisher.publish_calls, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

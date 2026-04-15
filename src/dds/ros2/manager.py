@@ -88,9 +88,9 @@ class DdsManager:
             else:
                 LOGGER.info("ROS 2 lowcmd subscriber disabled for this run")
             self._start_sidecar_bridge()
+            self._secondary_imu_publisher.initialize()
             if self._config.enable_ros2_lowstate:
                 self._lowstate_publisher.initialize()
-                self._secondary_imu_publisher.initialize()
             else:
                 LOGGER.info("ROS 2 lowstate publisher disabled for this run")
             self._sdk_enabled = True
@@ -119,27 +119,25 @@ class DdsManager:
         lowstate_published = False
         if (
             self._sdk_enabled
-            and self._config.enable_ros2_lowstate
             and simulation_time_seconds >= self._next_lowstate_publish_time
         ):
-            lowstate_published = self._lowstate_publisher.publish(snapshot)
-            if lowstate_published:
-                self._secondary_imu_publisher.publish(snapshot)
+            if self._config.enable_ros2_lowstate:
+                lowstate_published = self._lowstate_publisher.publish(snapshot)
+            self._secondary_imu_publisher.publish(snapshot)
             self._advance_lowstate_publish_schedule(simulation_time_seconds)
-            if lowstate_published:
-                wall_clock_seconds = time.monotonic()
-                self._simulation_cadence.record(
-                    simulation_time_seconds,
-                    expected_hz=self._config.lowstate_publish_hz,
-                    interval=self._config.lowstate_cadence_report_interval,
-                    warn_ratio=self._config.lowstate_cadence_warn_ratio,
-                )
-                self._wall_clock_cadence.record(
-                    wall_clock_seconds,
-                    expected_hz=self._config.lowstate_publish_hz,
-                    interval=self._config.lowstate_cadence_report_interval,
-                    warn_ratio=self._config.lowstate_cadence_warn_ratio,
-                )
+            wall_clock_seconds = time.monotonic()
+            self._simulation_cadence.record(
+                simulation_time_seconds,
+                expected_hz=self._config.lowstate_publish_hz,
+                interval=self._config.lowstate_cadence_report_interval,
+                warn_ratio=self._config.lowstate_cadence_warn_ratio,
+            )
+            self._wall_clock_cadence.record(
+                wall_clock_seconds,
+                expected_hz=self._config.lowstate_publish_hz,
+                interval=self._config.lowstate_cadence_report_interval,
+                warn_ratio=self._config.lowstate_cadence_warn_ratio,
+            )
 
         active_lowcmd = self._resolve_latest_lowcmd(now_monotonic=time.monotonic())
 
