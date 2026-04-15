@@ -1,7 +1,9 @@
 # Installation
 
 This document lists the host dependencies needed to run the Unitree G1 Isaac
-Sim environment with the ROS 2 sidecar bridge and the native Unitree SDK bridge.
+Sim environment with the ROS 2 sidecar bridge and the default
+`unitree_sdk2py` runtime. The native Unitree SDK bridge remains available as an
+optional alternate runtime.
 
 Tested environment:
 
@@ -65,9 +67,42 @@ Add those exports to `~/.bashrc` if you want them applied automatically in new
 terminals. Keep the real robot on domain `0`; use domain `1` for simulator
 testing unless you intentionally choose another isolated domain.
 
-## Install `unitree_sdk2`
+## Install `unitree_sdk2py`
 
-`unitree_sdk2` is the native SDK used by `native_sdk_bridge/`.
+`unitree_sdk2py` is the default policy-facing Unitree DDS runtime used by this
+branch. The simulator launches it in a separate system-Python sidecar process,
+and the current codebase expects the checkout at `~/unitree_sdk2_python` unless
+you provide it through `PYTHONPATH`.
+
+Install the Python SDK under your home directory:
+
+```bash
+cd ~
+git clone https://github.com/unitreerobotics/unitree_sdk2_python.git
+cd unitree_sdk2_python
+python3 -m pip install -e .
+```
+
+Verify that system Python can import it:
+
+```bash
+python3 -c "import unitree_sdk2py; print(unitree_sdk2py.__file__)"
+```
+
+If you keep the SDK somewhere other than `~/unitree_sdk2_python`, export it
+before launching the simulator or any SDK2 Python helper tools:
+
+```bash
+export PYTHONPATH=/path/to/unitree_sdk2_python:$PYTHONPATH
+```
+
+Use system Python for SDK2 Python tools and sidecars. Do not run them with
+Isaac Sim's embedded Python runtime.
+
+## Optional: install `unitree_sdk2`
+
+`unitree_sdk2` is only needed when you want to build or run the optional native
+C++ bridge in `native_sdk_bridge/`.
 
 ```bash
 sudo apt-get update

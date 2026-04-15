@@ -24,7 +24,7 @@ def encode_lowstate_packet(snapshot: RobotKinematicSnapshot, tick: int) -> bytes
         "joint_positions": [float(value) for value in dds_joint_snapshot.joint_positions],
         "joint_velocities": [float(value) for value in dds_joint_snapshot.joint_velocities],
         "joint_efforts": [float(value) for value in (dds_joint_snapshot.joint_efforts or [])],
-        "imu_quaternion_wxyz": [float(value) for value in snapshot.base_quaternion_wxyz],
+        "imu_quaternion_wxyz": [float(value) for value in snapshot.imu_quaternion_wxyz],
         "imu_accelerometer": [float(value) for value in snapshot.imu_linear_acceleration_body],
         "imu_gyroscope": [float(value) for value in snapshot.imu_angular_velocity_body],
     }

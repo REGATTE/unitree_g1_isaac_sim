@@ -13,6 +13,7 @@ from typing import Sequence
 
 import numpy as np
 from runtime_logging import get_logger
+from sensors.torso_imu import TorsoImuSensor
 
 
 _GRAVITY_MAGNITUDE_MPS2 = 9.81
@@ -57,6 +58,7 @@ class RobotKinematicSnapshot:
     base_quaternion_wxyz: tuple[float, ...]
     base_linear_velocity_world: tuple[float, ...]
     base_angular_velocity_world: tuple[float, ...]
+    imu_quaternion_wxyz: tuple[float, ...]
     imu_linear_acceleration_body: tuple[float, ...]
     imu_angular_velocity_body: tuple[float, ...]
     quaternion_convention: str = "wxyz"
@@ -71,6 +73,7 @@ class RobotKinematicSnapshot:
         object.__setattr__(self, "base_quaternion_wxyz", tuple(self.base_quaternion_wxyz))
         object.__setattr__(self, "base_linear_velocity_world", tuple(self.base_linear_velocity_world))
         object.__setattr__(self, "base_angular_velocity_world", tuple(self.base_angular_velocity_world))
+        object.__setattr__(self, "imu_quaternion_wxyz", tuple(self.imu_quaternion_wxyz))
         object.__setattr__(self, "imu_linear_acceleration_body", tuple(self.imu_linear_acceleration_body))
         object.__setattr__(self, "imu_angular_velocity_body", tuple(self.imu_angular_velocity_body))
 
@@ -142,17 +145,21 @@ class RobotStateReader:
         self._articulation = Articulation(prim_paths_expr=robot_prim_path, name="unitree_g1")
         self._initialized = False
         self._imu = ImuEmulator()
+        self._torso_imu = TorsoImuSensor(robot_prim_path)
         self._warned_physics_view_unavailable = False
 
     def initialize(self) -> None:
         if self._initialized:
             return
         self._articulation.initialize()
+        self._torso_imu.initialize()
         self._initialized = True
 
     def reinitialize_after_world_reset(self) -> None:
         """Rebind the articulation view after an in-session world reset."""
         self._articulation.initialize()
+        self._torso_imu.reset()
+        self._torso_imu.initialize()
         self._initialized = True
         self._warned_physics_view_unavailable = False
 
@@ -200,6 +207,7 @@ class RobotStateReader:
         # Startup/reset semantics should also clear transient estimators so the
         # next IMU sample is derived from the canonical startup state.
         self._imu = ImuEmulator()
+        self._torso_imu.reset()
         self._warned_physics_view_unavailable = False
 
         applied = positions_applied or velocities_applied
@@ -252,15 +260,7 @@ class RobotStateReader:
         base_position_world, base_quaternion_wxyz = self._read_world_pose()
         base_linear_velocity_world = self._read_linear_velocity_world()
         base_angular_velocity_world = self._read_angular_velocity_world()
-        imu_linear_acceleration_body = self._imu.compute_body_linear_acceleration(
-            base_linear_velocity_world,
-            base_quaternion_wxyz,
-            sample_dt,
-        )
-        imu_angular_velocity_body = _rotate_world_vector_to_body(
-            base_angular_velocity_world,
-            base_quaternion_wxyz,
-        )
+        torso_imu = self._torso_imu.read(sample_dt)
 
         return RobotKinematicSnapshot(
             joint_names=tuple(self.joint_names),
@@ -271,8 +271,9 @@ class RobotStateReader:
             base_quaternion_wxyz=base_quaternion_wxyz,
             base_linear_velocity_world=base_linear_velocity_world,
             base_angular_velocity_world=base_angular_velocity_world,
-            imu_linear_acceleration_body=imu_linear_acceleration_body,
-            imu_angular_velocity_body=imu_angular_velocity_body,
+            imu_quaternion_wxyz=torso_imu.quaternion_wxyz,
+            imu_linear_acceleration_body=torso_imu.linear_acceleration_body,
+            imu_angular_velocity_body=torso_imu.angular_velocity_body,
         )
 
     def apply_joint_position_targets(self, joint_positions: Sequence[float]) -> bool:

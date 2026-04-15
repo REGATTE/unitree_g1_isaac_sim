@@ -24,6 +24,7 @@ class NativeLowStateProtocolTests(unittest.TestCase):
             base_quaternion_wxyz=(1.0, 0.1, 0.2, 0.3),
             base_linear_velocity_world=(0.0, 0.0, 0.0),
             base_angular_velocity_world=(0.0, 0.0, 0.0),
+            imu_quaternion_wxyz=(0.5, 0.5, 0.5, 0.5),
             imu_linear_acceleration_body=(0.0, 0.0, 9.81),
             imu_angular_velocity_body=(0.1, 0.2, 0.3),
         )
@@ -32,7 +33,7 @@ class NativeLowStateProtocolTests(unittest.TestCase):
         payload = decode_native_lowstate_packet(packet)
 
         self.assertEqual(payload["tick"], 7)
-        self.assertEqual(payload["imu_quaternion_wxyz"], [1.0, 0.1, 0.2, 0.3])
+        self.assertEqual(payload["imu_quaternion_wxyz"], [0.5, 0.5, 0.5, 0.5])
         self.assertEqual(payload["imu_accelerometer_body"], [0.0, 0.0, 9.81])
         self.assertEqual(payload["imu_gyroscope_body"], [0.1, 0.2, 0.3])
 
